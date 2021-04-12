@@ -40,19 +40,26 @@ class UnbinnedNegativeLogLikelihoodFunction(Calculation):
     logarithm of the product of the data likelihood and Poisson likelihood that
     omits any terms that are constant as a function of input scales.
     '''
-    def __init__(self, name, x_kj, signals):
-        super().__init__(name,[s.nev_param for s in signals])
+    def __init__(self, name, x_kj, signals, observables):
+        n_evs = [s.nev_param for s in signals]
+        signal_systs = [s.systematics for s in signals]
+        systs = [syst for systs in signal_systs for syst in systs]
+        super().__init__(name,n_evs+systs)
+        i = len(n_evs)
+        self.signal_syst_bounds = [(i,i:=(i+len(systs))) for systs in signal_systs]
         self.x_kj = cp.ascontiguousarray(cp.asarray(x_kj))
         self.signals = signals
+        self.observables = observables
 
     def calculate(self, inputs):
-        scales = inputs[:len(self.signals)]
-        print('Evaluate:',['%0.3f'%s for s in scales])
+        n_evs = inputs[:len(self.signals)]
+        signal_systs = [inputs[a:b] for a,b in self.signal_syst_bounds]
+        print('Evaluate:',', '.join(['%0.3f'%s for s in n_evs]))
         if cp == np: # No GPU acceleration
-            pdf_sk = np.asarray([n*s.eval_pdf_multi(self.x_kj) for n,s in zip(inputs,self.signals)])
-            res = np.sum(scales) - np.sum(np.log(np.sum(pdf_sk,axis=0)))
+            pdf_sk = np.asarray([n*s.eval_pdf_multi(self.x_kj,systs=systs) for n,s,systs in zip(n_evs,self.signals,signal_systs)])
+            res = np.sum(n_evs) - np.sum(np.log(np.sum(pdf_sk,axis=0)))
         else:
-            pdf_sk = cp.asarray([n*s.eval_pdf_multi(self.x_kj,get=False) for n,s in zip(inputs,self.signals)])
-            res = np.sum(scales) - cp.sum(cp.log(cp.sum(pdf_sk,axis=0))).get()
+            pdf_sk = cp.asarray([n*s.eval_pdf_multi(self.x_kj,systs=systs,get=False) for n,s,systs in zip(n_evs,self.signals,signal_systs)])
+            res = np.sum(n_evs) - cp.sum(cp.log(cp.sum(pdf_sk,axis=0))).get()
         print('NLL:',res)
         return res

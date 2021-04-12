@@ -19,6 +19,8 @@ class Signal:
         self.a = cp.asarray([l for l in self.observables.lows])
         self.b = cp.asarray([h for h in self.observables.highs])
         self.nev_param = self.observables.analysis.add_parameter(name+'_nev',guess=guess,constant=False)
+        self.systematics = [syst for dim_systs in zip(observables.scales,observables.shifts,observables.resolutions) for syst in dim_systs]
+        
         
     def load_mc(self,mc_files):
         t_nij = []
@@ -159,16 +161,19 @@ class Signal:
         }
         ''', '_kdpdf1_multi') if cp != np else None
     
-    def eval_pdf(self, x_j):
+    def eval_pdf(self, x_j, systs=None):
         '''
         t_ij = [self.T(t_j,syst) for t_j in self.t_ij]
         w_i = [self.W(t_j,syst) for t_j in t_ij]
         h_ij = [self.C(t_j,h_j,syst) for t_j,h_j in zip(t_ij,self.h_ij)]
         return Signal._kdpdf1(x_j,t_ij,h_ij,w_i)/self._normalization(syst)
         '''
-        return self.eval_pdf_multi([x_j])[0]
+        return self.eval_pdf_multi([x_j],systs=systs)[0]
     
-    def eval_pdf_multi(self, x_kj, get=True):
+    def eval_pdf_multi(self, x_kj, systs=None, get=True):
+        if systs is None:
+            systs = cp.asarray([syst.guess for syst in self.systematics])
+        # FIXME systs should be used a) to transform MC (scale, shift) b) to transform bandwidth (resolution)
         x_kj = cp.asarray(x_kj)
         norm = cp.asarray(self._normalization())
         if np == cp:

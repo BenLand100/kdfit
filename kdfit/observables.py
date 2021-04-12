@@ -22,15 +22,25 @@ class Observables:
         self.indexes = []
         self.lows = []
         self.highs = []
+        self.scales = []
+        self.shifts = []
+        self.resolutions = []
         
         self.x_ij = None
         self.signals = {}
     
-    def add_dimension(self,name,index,low,high,scale=None,shift=None,resolution=None):
+    def add_dimension(self,name,index,low,high):
         self.dimensions.append(name)
         self.indexes.append(index)
         self.lows.append(low)
         self.highs.append(high)
+        scale = self.analysis.add_parameter(name+'_scale',guess=1.0)
+        self.scales.append(scale)
+        shift = self.analysis.add_parameter(name+'_shift',guess=0.0)
+        self.shifts.append(shift)
+        resolution = self.analysis.add_parameter(name+'_resolution',guess=0.0)
+        self.resolutions.append(resolution)
+        return scale,shift,resolution
         
     def add_signal(self,name,*args,**kwargs):
         if name in self.signals:
@@ -56,7 +66,8 @@ class Observables:
         return UnbinnedNegativeLogLikelihoodFunction(
             self.name+'_KernalDensity_Likelihood',
             self.x_ij,
-            list(self.signals.values()))
+            list(self.signals.values()),
+            self)
         
     def read_file(self,fname):
         events = np.load(fname)
