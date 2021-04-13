@@ -34,11 +34,11 @@ class Observables:
         self.indexes.append(index)
         self.lows.append(low)
         self.highs.append(high)
-        scale = self.analysis.add_parameter(name+'_scale',guess=1.0)
+        scale = self.analysis.add_parameter(name+'_scale',value=1.0)
         self.scales.append(scale)
-        shift = self.analysis.add_parameter(name+'_shift',guess=0.0)
+        shift = self.analysis.add_parameter(name+'_shift',value=0.0)
         self.shifts.append(shift)
-        resolution = self.analysis.add_parameter(name+'_resolution',guess=0.0)
+        resolution = self.analysis.add_parameter(name+'_resolution',value=0.0)
         self.resolutions.append(resolution)
         return scale,shift,resolution
         
@@ -59,7 +59,7 @@ class Observables:
         return self.eval_pdf_multi([x_j])[0]
     
     def eval_pdf_multi(self, x_kj):
-        n_evs = [s.nev_param.guess for s in self.signals.values()]
+        n_evs = [s.nev_param.value for s in self.signals.values()]
         return np.sum([ n*s.eval_pdf_multi(x_kj) for n,s in zip(n_evs,self.signals.values()) ],axis=0)/np.sum(n_evs)
     
     def get_likelihood(self):

@@ -58,7 +58,11 @@ class Analysis:
         outputs = self._system.calculate(min_params)
         return outputs[0]
         
-    def minimize(self,**kwargs):
-        initial = [g if (g:=p.guess) else 1.0 for p in self._floated]
+    def minimize(self,fixed=(),**kwargs):
+        initial = [g if (g:=p.value) else 1.0 for p in self._floated]
         minimum = opt.minimize(self,x0=initial,**kwargs)
         return minimum
+        
+    def profile(self,minimum,param,**kwargs):
+        return opt.minimize(lambda x: self(substitute()),x0=(50,),method='Nelder-Mead').fun - minimum.fun
+

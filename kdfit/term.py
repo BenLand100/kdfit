@@ -9,16 +9,16 @@ class Parameter(Calculation):
     '''
     Represents an input to a System
     
-    guess is the initial or fixed value of the Parameter
+    value is the initial or fixed value of the Parameter
     constant sets whether the parameter is fixed (True) or floated (False)
     '''
-    def __init__(self,name,guess=None,constant=True):
+    def __init__(self,name,value=None,constant=True):
         super().__init__(name,[],constant=constant)
         self.name = name
-        self.guess = guess
+        self.value = value
     def calculate(self,inputs):
         if self.constant:
-            return self.guess
+            return self.value
         
 class Sum(Calculation):
     '''
