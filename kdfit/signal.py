@@ -5,21 +5,25 @@ try:
 except:
     cp = np # Use numpy to emulate cupy on CPU
     from scipy.special import erf
+from .calculate import Calculation
     
-class Signal:
+class Signal(Calculation):
     '''
     Represents the monte-carlo data that is used to build a PDF for a single 
     class of events, and contains the logic to evaluate the PDF using an 
     adaptive kernel density estimation algorithm.
+    
+    The Signal is a function of the systematics it defines, and the result of 
+    `calculate` should be passed as the `systs` arugment to eval_pdf functions.
     '''
 
     def __init__(self,name,observables,value=1.0):
-        self.name = name
         self.observables = observables
         self.a = cp.asarray([l for l in self.observables.lows])
         self.b = cp.asarray([h for h in self.observables.highs])
         self.nev_param = self.observables.analysis.add_parameter(name+'_nev',value=value,constant=False)
         self.systematics = [syst for dim_systs in zip(observables.scales,observables.shifts,observables.resolutions) for syst in dim_systs]
+        super().__init__(name,self.systematics)
         
         
     def load_mc(self,mc_files):
@@ -66,18 +70,14 @@ class Signal:
         }
         ''', '_kdpdf0_multi') if cp != np else None
         
-    def _estimate_pdf(self,x_j):
-        return self._estimate_pdf_multi([x_j])[0]
+    def _estimate_pdf(self,x_j,w_i=None):
+        return self._estimate_pdf_multi([x_j],w_i=w_i)[0]
     
-    def _estimate_pdf_multi(self,x_kj,get=True):
+    def _estimate_pdf_multi(self,x_kj,w_i=None,get=True):
+        if w_i == None:
+            w_i = self.w_i
         n = self.t_ij.shape[0]
         h_j = (4/3/n)**(1/5)*self.sigma_j
-        '''
-        # FIXME this should (at least) take into account event weights 
-        t_ij = [self.T(t_j,syst) for t_j in self.t_ij]
-        w_i = [self.W(t_j,syst) for t_j in t_ij]
-        h_ij = [self.C(t_j,h_j,syst) for t_j in t_ij]
-        '''
         if cp == np:
             return np.asarray([Signal._kdpdf0(x_j,self.t_ij,h_j,self.w_i) for x_j in x_kj])
         else:
@@ -86,13 +86,13 @@ class Signal:
             pdf_k = cp.empty(x_kj.shape[0])
             block_size = 64
             grid_size = x_kj.shape[0]//block_size+1
-            Signal._kdpdf0_multi((grid_size,),(block_size,),(x_kj,self.t_ij,h_j,self.w_i,
+            Signal._kdpdf0_multi((grid_size,),(block_size,),(x_kj,self.t_ij,h_j,w_i,
                                                              self.t_ij.shape[0],self.t_ij.shape[1],x_kj.shape[0],
                                                              pdf_k))
             pdf_k = pdf_k/cp.sum(self.w_i)
             return pdf_k.get() if get else pdf_k
         
-    def adapt_bandwidth(self,systs=None):
+    def adapt_bandwidth(self,w_i=None):
         '''
         Calculates and returns bandwidths for all pdf events.
         '''
@@ -102,7 +102,7 @@ class Signal:
         h_i = (4/(d+2))**(1/(d+4)) \
                * n**(-1/(d+4)) \
                / sigma \
-               / self._estimate_pdf_multi(self.t_ij,get=False)**(1/d)
+               / self._estimate_pdf_multi(self.t_ij,w_i=w_i,get=False)**(1/d)
         h_ij = cp.outer(h_i,self.sigma_j)
         cp.cuda.Stream.null.synchronize()
         return cp.ascontiguousarray(h_ij)
@@ -213,11 +213,9 @@ class Signal:
         calculation on the default GPU. (See: Signal._kdpdf1_multi)
         '''
         if systs is None:
-            systs = [syst.value for syst in self.systematics]
-        systs = cp.asarray(systs,dtype=cp.float64)
-        t_ij = self._transform_syst(systs)
-        h_ij = self._conv_syst(systs)
-        w_i = self._weight_syst(systs)
+            t_ij,h_ij,w_i = self.t_ij,self.h_ij,self.w_i
+        else:
+            t_ij,h_ij,w_i = systs
         x_kj = cp.asarray(x_kj)
         norm = cp.asarray(self._normalization(t_ij=t_ij,h_ij=h_ij,w_i=w_i))
         if np == cp:
@@ -234,16 +232,16 @@ class Signal:
             pdf_k = pdf_k/cp.sum(self.w_i)/norm
             return pdf_k.get() if get else pdf_k
     
-    def _transform_syst(self,systs):
+    def _transform_syst(self,inputs):
         '''
         Scales and shifts datapoints by those systematics. Shift is in the units
         of the scaled dimension.
         '''
-        scales = systs[0:3*len(self.observables.scales):3]
-        shifts = systs[1:3*len(self.observables.shifts):3]
+        scales = inputs[0:3*len(self.observables.scales):3]
+        shifts = inputs[1:3*len(self.observables.shifts):3]
         return scales*self.t_ij+shifts
         
-    def _weight_syst(self,systs):
+    def _weight_syst(self,inputs):
         '''
         Reweight events. (e.g. neutrino survival probability would be 
         implemented here.)
@@ -252,14 +250,26 @@ class Signal:
         one should call adapt_bandwidth since the zeroth order estimate would
         change.
         '''
-        return self.w_i 
+        return self.w_i,self.h_ij
         
-    def _conv_syst(self,systs):
+    def _conv_syst(self,inputs,h_ij=None):
         '''
         Convolves the bandwidths with the resolutions scaled by the scale
         systematics. Resolutions are in the units of the scaled dimension.
         '''
-        scales = systs[0:3*len(self.observables.scales):3]
-        resolutions = systs[2:3*len(self.observables.shifts):3]
-        return cp.sqrt(cp.square(scales*self.h_ij) + cp.square(resolutions))
+        if h_ij is None:
+            h_ij = self.h_ij
+        scales = inputs[0:3*len(self.observables.scales):3]
+        resolutions = inputs[2:3*len(self.observables.shifts):3]
+        return cp.sqrt(cp.square(scales*h_ij) + cp.square(resolutions))
         
+    def calculate(self,inputs,verbose=False):
+        '''
+        Calculates the systematically transformed PDF weights, events, and 
+        bandwidths. 
+        '''
+        inputs = cp.asarray(inputs,dtype=cp.float64)
+        w_i,h_ij = self._weight_syst(inputs)
+        t_ij = self._transform_syst(inputs)
+        h_ij = self._conv_syst(inputs)
+        return t_ij,h_ij,w_i

@@ -42,17 +42,19 @@ class Analysis:
                 obs = self.observables[obs]
             obs.load_data(fnames)
             
-    def create_likelihood(self):
+    def create_likelihood(self,verbose=False):
         self._params = [p for p in self.parameters.values()]
         self._floated = [p for p in self._params if not p.constant]
-        print('Floated Parameters:',self._floated)
+        if verbose:
+            print('Floated Parameters:',self._floated)
         self._terms = []
         for name,obs in self.observables.items():
             nllfn = obs.get_likelihood()
             self._terms.append(nllfn)
         self._outputs = [Sum('Total_Likelihood',*self._terms)]
-        print('Ouput Values:',self._outputs)
-        self._system = System(self._floated,self._outputs,verbose=True)
+        if verbose:
+            print('Ouput Values:',self._outputs)
+        self._system = System(self._floated,self._outputs,verbose=verbose)
         
     def __call__(self,min_params):
         outputs = self._system.calculate(min_params)
@@ -61,8 +63,7 @@ class Analysis:
     def minimize(self,fixed=(),**kwargs):
         initial = [g if (g:=p.value) else 1.0 for p in self._floated]
         minimum = opt.minimize(self,x0=initial,**kwargs)
+        minimum.params = {p:v for p,v in zip(self._floated,minimum.x)}
         return minimum
         
-    def profile(self,minimum,param,**kwargs):
-        return opt.minimize(lambda x: self(substitute()),x0=(50,),method='Nelder-Mead').fun - minimum.fun
 

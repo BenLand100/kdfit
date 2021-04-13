@@ -85,8 +85,9 @@ class System:
         self.children_indexes = [np.asarray(child_indexes,dtype=np.int32) for child_indexes in children_indexes]
         self.parents_indexes = [np.asarray(parent_indexes,dtype=np.int32) for parent_indexes in parents_indexes]
         
+        #FIXME eventually going to want to _avoid_ recalculating things that haven't changed
         evaluation_order = []
-        input_children = np.unique(np.concatenate([self.children_indexes[i] for i in self.input_indexes]))
+        input_children = np.unique(np.concatenate([self.children_indexes[i] for i in np.concatenate([self.input_indexes,self.constant_indexes])]))
         not_evaluated  = np.ones_like(self.parts,dtype=bool)
         not_evaluated[self.input_indexes] = False
         not_evaluated[self.constant_indexes] = False
@@ -113,7 +114,7 @@ class System:
         state = np.asarray([None for p in self.parts],dtype=object)
         
         for constant_index in zip(self.constant_indexes):
-            state[constant_index] = self.parts[constant_index].calculate(None)
+            state[constant_index] = self.parts[constant_index].calculate(None,verbose=verbose)
             if verbose:
                 print(self.parts[constant_index],state[constant_index])
             
@@ -123,7 +124,7 @@ class System:
                 print(self.parts[input_index],state[input_index])
         
         for index in self.evaluation_order:
-            state[index] = self.parts[index].calculate(state[self.parents_indexes[index]])
+            state[index] = self.parts[index].calculate(state[self.parents_indexes[index]],verbose=verbose)
             if verbose:
                 print(self.parts[index],state[index])
 
