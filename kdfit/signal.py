@@ -109,7 +109,7 @@ class Signal(Calculation):
     
     _sqrt2 = cp.sqrt(2)
 
-    def _int_kdpdf1(a_j,b_j,t_ij,h_ij,w_i):
+    def _int_kdpdf1(a_j,b_j,t_ij,h_ij,w_i,get=True):
         '''
         Integrates the PDF evaluated by _kdpdf1 and _kdpdf1_multi.
         
@@ -120,13 +120,82 @@ class Signal(Calculation):
         w_i are the weights of each PDF event
         '''
         w = cp.sum(w_i)
-        n = len(t_ij)
-        d = len(t_ij[0])
+        n = t_ij.shape[0]
+        d = t_ij.shape[1]
         res = cp.sum(w_i*cp.prod(
                 erf((b_j-t_ij)/h_ij/Signal._sqrt2) - erf((a_j-t_ij)/h_ij/Signal._sqrt2)
             ,axis=1))/w/(2**d)
-        return res if np == cp else res.get()
+        return res.get() if get else res
     
+    _int_kdpdf1_multi = cp.RawKernel(r'''
+        #define sqrt2 1.4142135623730951
+        extern "C" __global__
+        void _int_kdpdf1_multi(const double* a_kj, const double* b_kj, const double* t_ij, const double* h_ij, const double* w_i, 
+                               const int n_i, const int n_j, const int n_k, double* int_k) {
+            /*
+            2D arrays are passed to several of these arguments with row-major memory layout. 
+            
+            This CUDA kernel integrates a Gaussian Kernel Density PDF in regions bounded
+            by a_j and b_j in the lists a_kj and b_kj.
+                k - region index
+                j - dimension index
+            t_ij is the events used to build the kernel density PDF
+                i - pdf point index
+                j - dimension index
+            h_ij is the bandwidth used to build the kernel density PDF
+                i - pdf point index
+                j - dimension index
+                
+            w_i is the weight of each event
+            n_i, n_j, n_k are the size of each index
+            
+            The resulting value is not normalized by the sum of weights, but otherwise
+            is normalized from (-infty,+infty), and stored in int_k.
+                k - data point index.
+            */
+            int k = blockDim.x * blockIdx.x + threadIdx.x;
+            if (k >= n_k) return;
+            double integral = 0.0;
+            for (int i = 0; i < n_i; i++) {
+                double prod = w_i[i];
+                for (int j = 0; j < n_j; j++) {
+                    prod *= erf((b_kj[k*n_j+j]-t_ij[i*n_j+j])/h_ij[i*n_j+j]/sqrt2) 
+                          - erf((a_kj[k*n_j+j]-t_ij[i*n_j+j])/h_ij[i*n_j+j]/sqrt2);
+                }
+                integral += prod;
+            }
+            double power = 1.0;
+            for (int j = 0; j < n_j; j++) power *= 2.0;
+            int_k[k] = integral/power;
+        }
+        ''', '_int_kdpdf1_multi') if cp != np else None
+        
+    def int_pdf(self,a_j,b_j,systs=None):
+        if systs is None:
+            t_ij,h_ij,w_i = self.t_ij,self.h_ij,self.w_i
+        else:
+            t_ij,h_ij,w_i = systs
+        return Signal._int_kdpdf1(a_j,b_j,t_ij,h_ij,w_i)
+    
+    def int_pdf_multi(self,a_kj,b_kj,systs=None,get=False):
+        if systs is None:
+            t_ij,h_ij,w_i = self.t_ij,self.h_ij,self.w_i
+        else:
+            t_ij,h_ij,w_i = systs
+        if cp == np:
+            return [Signal._int_kdpdf1(a_j,b_j,t_ij,h_ij,w_i) for a_j,b_j in zip(a_kj,b_kj)]
+        else:
+            int_k = cp.empty(a_kj.shape[0])
+            block_size = 64
+            grid_size = a_kj.shape[0]//block_size+1
+            Signal._int_kdpdf1_multi((grid_size,),(block_size,),(a_kj,b_kj,t_ij,h_ij,w_i,
+                                                                 t_ij.shape[0],
+                                                                 t_ij.shape[1],
+                                                                 a_kj.shape[0],
+                                                                 int_k))
+            int_k = int_k/cp.sum(self.w_i)
+            return int_k.get() if get else int_k
+        
     def _normalization(self,a=None,b=None,t_ij=None,h_ij=None,w_i=None):
         '''
         Calls _norm_kdpdf1 wit the defaults set to the observable bounds and 
@@ -159,6 +228,7 @@ class Signal(Calculation):
         return res if np == cp else res.get()
 
     _kdpdf1_multi = cp.RawKernel(r'''
+        #define sqrt2pi 2.5066282746310007
         extern "C" __global__
         void _kdpdf1_multi(const double* x_kj, const double* t_ij, const double* h_ij, const double* w_i, 
                            const int n_i, const int n_j, const int n_k, double* pdf_k) {
@@ -186,14 +256,14 @@ class Signal(Calculation):
             if (k >= n_k) return;
             double pdf = 0.0;
             for (int i = 0; i < n_i; i++) {
-                double prod = 1.0;
+                double prod = w_i[i];
                 double a = 0;
                 for (int j = 0; j < n_j; j++) {
-                    prod /= h_ij[i*n_j+j]*2.5066282746310007;
+                    prod /= h_ij[i*n_j+j]*sqrt2pi;
                     double b = (x_kj[k*n_j+j]-t_ij[i*n_j+j])/h_ij[i*n_j+j];
                     a += b * b;
                 }
-                pdf += w_i[i]*prod*exp(-0.5*a);
+                pdf += prod*exp(-0.5*a);
             }
             pdf_k[k] = pdf;
         }

@@ -1,5 +1,5 @@
 import numpy as np
-from .term import UnbinnedNegativeLogLikelihoodFunction
+from .term import UnbinnedNegativeLogLikelihoodFunction, BinnedNegativeLogLikelihoodFunction
 from .signal import Signal
 
 class Observables:
@@ -15,7 +15,7 @@ class Observables:
           full PDF by summing the contribution from each class
     '''
     
-    def __init__(self,name,analysis):
+    def __init__(self,name,analysis,binning=None):
         self.name = name
         self.analysis = analysis
         self.dimensions = []
@@ -27,6 +27,7 @@ class Observables:
         self.resolutions = []
         
         self.x_ij = None
+        self.binning = binning
         self.signals = {}
     
     def add_dimension(self,name,index,low,high):
@@ -63,11 +64,20 @@ class Observables:
         return np.sum([ n*s.eval_pdf_multi(x_kj) for n,s in zip(n_evs,self.signals.values()) ],axis=0)/np.sum(n_evs)
     
     def get_likelihood(self):
-        return UnbinnedNegativeLogLikelihoodFunction(
-            self.name+'_KernalDensity_Likelihood',
-            self.x_ij,
-            list(self.signals.values()),
-            self)
+        if self.binning is None:
+            return UnbinnedNegativeLogLikelihoodFunction(
+                self.name+'_UnbinnedLikelihood',
+                self.x_ij,
+                list(self.signals.values()),
+                self)
+        else:
+            return BinnedNegativeLogLikelihoodFunction(
+                self.name+'_BinnedLikelihood',
+                self.x_ij,
+                list(self.signals.values()),
+                self,
+                binning=self.binning)
+            
         
     def read_file(self,fname):
         events = np.load(fname)

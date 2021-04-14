@@ -129,7 +129,7 @@ class Analysis:
                 # central value left and right of the minimum. Then increase 
                 # step by a factor of two until the step is large enough to
                 # contain the desired root.
-                for step_factor in [0.1,0.2,0.5,1.0,2.0,5.0,10.0]:
+                for step_factor in [0.5,1.0,2.0,5.0,10.0]:
                     try:
                         step = v*step_factor
                         lo = opt.brentq(dnll,v-step,v,xtol=0.01,rtol=0.00001)
