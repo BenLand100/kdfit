@@ -37,7 +37,6 @@ class Observables(Calculation):
         self.name = name
         self.analysis = analysis
         self.dimensions = []
-        self.indexes = []
         self.lows = []
         self.highs = []
         self.scales = []
@@ -52,9 +51,8 @@ class Observables(Calculation):
         self.data_param = self.analysis.add_parameter(name+'_data',fixed=False)
         super().__init__(name,[self.data_param])
     
-    def add_dimension(self,name,index,low,high):
+    def add_dimension(self,name,low,high):
         self.dimensions.append(name)
-        self.indexes.append(index)
         self.lows.append(low)
         self.highs.append(high)
         scale = self.analysis.add_parameter(name+'_scale',value=1.0)
@@ -94,13 +92,7 @@ class Observables(Calculation):
                 list(self.signals.values()),
                 self,
                 binning=self.binning)
-            
-        
-    def read_file(self,fname):
-        events = np.load(fname)
-        t_ji = [events[:,idx] for idx in self.indexes]
-        return np.asarray(t_ji).T
-        
+    
     def calculate(self,inputs,verbose=False):
         #even if calculate is rerun, only reload data if the loader changed
         if self.last_data is not inputs[0]:

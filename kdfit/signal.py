@@ -34,8 +34,9 @@ class Signal(Calculation):
     `calculate` should be passed as the `systs` arugment to eval_pdf functions.
     '''
 
-    def __init__(self,name,observables,value=None):
+    def __init__(self,name,observables,value=None,reflect_axes=None):
         self.observables = observables
+        self.reflect_axes = reflect_axes if reflect_axes is not None else [False for _ in range(len(observables.dimensions))]
         self.a = cp.asarray([l for l in self.observables.lows])
         self.b = cp.asarray([h for h in self.observables.highs])
         self.nev_param = self.observables.analysis.add_parameter(name+'_nev',value=value,fixed=False)
@@ -46,8 +47,20 @@ class Signal(Calculation):
         super().__init__(name,[self.mc_param]+self.systematics)
         
     def load_mc(self,t_ij):
-        self.t_ij = cp.ascontiguousarray(cp.asarray(t_ij))
-        self.sigma_j = cp.std(self.t_ij,axis=0)
+        for j,(l,h) in enumerate(zip(self.observables.lows,self.observables.highs)):
+            in_bounds = np.logical_and(t_ij[:,j] > l,t_ij[:,j] < h)
+            t_ij = t_ij[in_bounds]
+        t_ij = cp.asarray(t_ij)
+        self.sigma_j = cp.std(t_ij,axis=0)
+        for j,(l,h,refl) in enumerate(zip(self.observables.lows,self.observables.highs,self.reflect_axes)):
+            if not refl:
+                continue
+            reflected_low = cp.copy(t_ij)
+            reflected_low[:,j] = 2*l - t_ij[:,j]
+            reflected_high = cp.copy(t_ij)
+            reflected_high[:,j] = 2*h - t_ij[:,j]
+            t_ij = cp.concatenate([t_ij,reflected_low,reflected_high])
+        self.t_ij = cp.ascontiguousarray(t_ij)
         self.w_i = cp.ones(self.t_ij.shape[0])
         self.h_ij = self.adapt_bandwidth()
         

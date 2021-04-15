@@ -64,9 +64,9 @@ class Analysis:
         '''
         Builds a calculation system that computes the sum of the log likelihood
         from all Observables in this Analysis. This *must* be called again if
-        the objects in the calculation system are changed, but should neither be 
-        called to adjust whether Parameters are floated or fixed, nor if their
-        default values changed (call update_likelihood instead).
+        the topology of the calculation changes (new objects), but should 
+        neither be called to adjust whether Parameters are floated or fixed, nor 
+        if their values changed (call update_likelihood instead).
         '''
         self._terms = []
         for name,obs in self.observables.items():
@@ -97,7 +97,7 @@ class Analysis:
         for example, evaluate the likelihood during minimization.
         '''
         if floated_params is None:
-            floated_params = [g if (g:=p.value) else 1.0 for p in self._floated]
+            floated_params = [p.value for p in self._floated]
         outputs = self._system.calculate(floated_params,verbose=verbose)
         return outputs[0]
         
