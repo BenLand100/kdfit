@@ -154,6 +154,10 @@ class System:
         self.constant_indexes = np.asarray(constant_indexes,dtype=np.int32)
         return floated,fixed
     
+    # FIXME Perhaps System should be agnostic to floated and fixed Parameters, 
+    # and instead require all Parameters as input, making Analysis distinguish 
+    # between floated and fixed, building a parameter list for both.
+    
     def calculate(self,floated,verbose=False):
         recompute = []
         for indexes,values in [(self.floated_indexes,floated),(self.fixed_indexes,[p.value for p in self.parts[self.fixed_indexes]])]:

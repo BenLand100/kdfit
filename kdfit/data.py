@@ -20,11 +20,21 @@ from .calculate import Calculation
 import h5py
 import numpy as np
 
-class HDF5Data(Calculation):
+class DataLoader(Calculation):
     '''
     This is a generic data input Calculation. Create subclasses of Calculation
-    to load data of other formats.
+    to load data of other formats. Subclasses should load data when called.
+    '''
     
+    def __init__(self,name):
+        super().__init__(name, [], constant=True)
+        
+    def calculate(self,inputs,verbose=False):
+        return self
+
+
+class HDF5Data(DataLoader):
+    '''
     Assumes each dimension of an Observable is stored as a dataset in an HDF5
     file. The datasets should be one dimensional and indexed by event number.
     All should be the same shape. Will chain together multiple files into one
@@ -32,23 +42,21 @@ class HDF5Data(Calculation):
     '''
 
     def __init__(self,name,filenames,datasets):
-        super().__init__(name, [], constant=True)
+        super().__init__(name)
         self.filenames = filenames
         self.datasets = datasets
-        
-    def calculate(self,inputs,verbose=False):
+    
+    def __call__(self):
+        print('Loading:',', '.join(self.filenames))
         data = [[] for ds in self.datasets]
         for fname in self.filenames:
             with h5py.File(fname,'r') as hf:
                 for j,ds in enumerate(datasets):
                     data[j].extend(hf[ds])
         return np.asarray(data)
-                    
-class NPYData(Calculation):
+        
+class NPYData(DataLoader):
     '''
-    This is a generic data input Calculation. Create subclasses of Calculation
-    to load data of other formats.
-    
     Assumes each dimension of an Observable is stored as a dataset in an HDF5
     file. The datasets should be one dimensional and indexed by event number.
     All should be the same shape. Will chain together multiple files into one
@@ -56,12 +64,13 @@ class NPYData(Calculation):
     '''
 
     def __init__(self,name,filenames,indexes,ordering='ij'):
-        super().__init__(name, [], constant=True)
+        super().__init__(name)
         self.filenames = filenames
         self.indexes = np.asarray(indexes,dtype=np.int32)
         self.ordering = ordering
         
-    def calculate(self,inputs,verbose=False):
+    def __call__(self):
+        print('Loading:',', '.join(self.filenames))
         x_nij = []
         for fname in self.filenames:
             events = np.load(fname)

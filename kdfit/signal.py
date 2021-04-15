@@ -40,6 +40,7 @@ class Signal(Calculation):
         self.b = cp.asarray([h for h in self.observables.highs])
         self.nev_param = self.observables.analysis.add_parameter(name+'_nev',value=value,fixed=False)
         self.systematics = [syst for dim_systs in zip(observables.scales,observables.shifts,observables.resolutions) for syst in dim_systs]
+        # Should be linked to something that loads MC when called (DataLoader)
         self.mc_param = self.observables.analysis.add_parameter(name+'_mc',fixed=False)
         self.cur_mc = None
         super().__init__(name,[self.mc_param]+self.systematics)
@@ -352,8 +353,9 @@ class Signal(Calculation):
         Calculates the systematically transformed PDF weights, events, and 
         bandwidths. 
         '''
+        #even if calculate is rerun, only reload mc if the loader changed
         if self.cur_mc is not inputs[0]:
-            self.load_mc(inputs[0])
+            self.load_mc(inputs[0]())
             self.cur_mc = inputs[0]
         systs = cp.asarray(inputs[1:],dtype=cp.float64)
         w_i,h_ij = self._weight_syst(systs)

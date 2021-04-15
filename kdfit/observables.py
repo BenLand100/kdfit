@@ -48,6 +48,7 @@ class Observables(Calculation):
         self.signals = {}
         
         self.last_data = None
+        # Should be linked to something that loads data when called (DataLoader)
         self.data_param = self.analysis.add_parameter(name+'_data',fixed=False)
         super().__init__(name,[self.data_param])
     
@@ -101,7 +102,8 @@ class Observables(Calculation):
         return np.asarray(t_ji).T
         
     def calculate(self,inputs,verbose=False):
+        #even if calculate is rerun, only reload data if the loader changed
         if self.last_data is not inputs[0]:
-            self.load_data(inputs[0])
+            self.load_data(inputs[0]())
             self.last_data = inputs[0]
         return self.x_ij
