@@ -34,25 +34,22 @@ class Signal(Calculation):
     `calculate` should be passed as the `systs` arugment to eval_pdf functions.
     '''
 
-    def __init__(self,name,observables,value=1.0):
+    def __init__(self,name,observables,value=None):
         self.observables = observables
         self.a = cp.asarray([l for l in self.observables.lows])
         self.b = cp.asarray([h for h in self.observables.highs])
-        self.nev_param = self.observables.analysis.add_parameter(name+'_nev',value=value,constant=False)
+        self.nev_param = self.observables.analysis.add_parameter(name+'_nev',value=value,fixed=False)
         self.systematics = [syst for dim_systs in zip(observables.scales,observables.shifts,observables.resolutions) for syst in dim_systs]
-        super().__init__(name,self.systematics)
+        self.mc_param = self.observables.analysis.add_parameter(name+'_mc',fixed=False)
+        self.cur_mc = None
+        super().__init__(name,[self.mc_param]+self.systematics)
         
-        
-    def load_mc(self,mc_files):
-        t_nij = []
-        for fname in mc_files:
-            t_nij.append(self.observables.read_file(fname))
-        self.t_ij = cp.ascontiguousarray(cp.asarray(np.concatenate(t_nij)))
+    def load_mc(self,t_ij):
+        self.t_ij = cp.ascontiguousarray(cp.asarray(t_ij))
         self.sigma_j = cp.std(self.t_ij,axis=0)
         self.w_i = cp.ones(self.t_ij.shape[0])
         self.h_ij = self.adapt_bandwidth()
         
-
     _inv_sqrt_2pi = 1/cp.sqrt(2*cp.pi)
 
     def _kdpdf0(x_j,t_ij,h_j,w_i):
@@ -355,8 +352,11 @@ class Signal(Calculation):
         Calculates the systematically transformed PDF weights, events, and 
         bandwidths. 
         '''
-        inputs = cp.asarray(inputs,dtype=cp.float64)
-        w_i,h_ij = self._weight_syst(inputs)
-        t_ij = self._transform_syst(inputs)
-        h_ij = self._conv_syst(inputs)
+        if self.cur_mc is not inputs[0]:
+            self.load_mc(inputs[0])
+            self.cur_mc = inputs[0]
+        systs = cp.asarray(inputs[1:],dtype=cp.float64)
+        w_i,h_ij = self._weight_syst(systs)
+        t_ij = self._transform_syst(systs)
+        h_ij = self._conv_syst(systs)
         return t_ij,h_ij,w_i

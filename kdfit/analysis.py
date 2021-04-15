@@ -16,8 +16,8 @@
 #  along with kdfit.  If not, see <https://www.gnu.org/licenses/>.
 
 from .observables import Observables
-from .calculate import System
-from .term import Parameter,Sum
+from .calculate import Parameter,System
+from .term import Sum
 
 import scipy.optimize as opt
 from functools import partial
@@ -45,31 +45,29 @@ class Analysis:
         self.observables[obs.name] = obs
         return obs
         
-    def load_mc(self,mc_files):
-        for obs,sig_map in mc_files.items():
+    def load_mc(self,mc_loaders):
+        for obs,sig_map in mc_loaders.items():
             if type(obs) is str:
                 obs = self.observables[obs]
-            for sig,fnames in sig_map.items():
+            for sig,loader in sig_map.items():
                 if type(sig) is str:
                     sig = obs.signals[sig]
-                sig.load_mc(fnames)
+                sig.mc_param.link(loader)
                 
-    def load_data(self,data_files):
-        for obs,fnames in data_files.items():
+    def load_data(self,data_loaders):
+        for obs,loader in data_loaders.items():
             if type(obs) is str:
                 obs = self.observables[obs]
-            obs.load_data(fnames)
+            obs.data_param.link(loader)
             
     def create_likelihood(self,verbose=False):
         '''
         Builds a calculation system that computes the sum of the log likelihood
         from all Observables in this Analysis. This *must* be called again if
-        constant settings change for any Parameters, e.g. when profiling.
+        the objects in the calculation system are changed, but should neither be 
+        called to adjust whether Parameters are floated or fixed, nor if their
+        default values changed (call update_likelihood instead).
         '''
-        self._params = [p for p in self.parameters.values()]
-        self._floated = [p for p in self._params if not p.constant]
-        if verbose:
-            print('Floated Parameters:',self._floated)
         self._terms = []
         for name,obs in self.observables.items():
             nllfn = obs.get_likelihood()
@@ -77,9 +75,20 @@ class Analysis:
         self._outputs = [Sum('Total_Likelihood',*self._terms)]
         if verbose:
             print('Ouput Values:',self._outputs)
-        self._system = System(self._floated,self._outputs,verbose=verbose)
+        self._system = System(self._outputs,verbose=verbose)
+        self.update_likelihood(verbose=verbose)
         
-    def __call__(self,floated_params=None):
+    def update_likelihood(self,verbose=False):
+        '''
+        If Parameters are changed from fixed to floated, call this method before
+        evaluating the likelihood.
+        '''
+        self._floated,self._fixed = self._system.classify_inputs()
+        if verbose:
+            print('Floated Parameters:',self._floated)
+            print('Fixed Parameters:',self._fixed)
+        
+    def __call__(self,floated_params=None,verbose=False):
         '''
         Performs the current log likelihood calculation and returns the result.
         
@@ -89,7 +98,7 @@ class Analysis:
         '''
         if floated_params is None:
             floated_params = [g if (g:=p.value) else 1.0 for p in self._floated]
-        outputs = self._system.calculate(floated_params)
+        outputs = self._system.calculate(floated_params,verbose=verbose)
         return outputs[0]
         
     def minimize(self,**kwargs):
@@ -125,17 +134,17 @@ class Analysis:
         in the negative log likelihood from the minimum (0.5 for one sigma, etc)
         '''
         params = minimum.params if params is None else {p:minimum.params[p] for p in params}
-        initial_state = [(p.value,p.constant) for p in params]
+        initial_state = [(p.value,p.fixed) for p in params]
         upper,lower = {},{}
         try:
             # set all parameters to minimum values
             for p,v in params.items():
                 p.value = v
-                p.constant = False
+                p.fixed = False
             # compute confidence intervals for each parameter
             for p,v in params.items():
-                p.constant = True
-                self.create_likelihood()
+                p.fixed = True
+                self.update_likelihood()
                 if method == 'profile':
                     dnll = partial(self._delta_nll,minimum,p,margs=margs,ci_delta=ci_delta)
                 elif method == 'scan':
@@ -156,14 +165,14 @@ class Analysis:
                         step_factor *= 2
                 upper[p] = hi-v
                 lower[p] = v-lo
-                p.constant = False
+                p.fixed = False
                 p.value = v
         finally:
             # Put parameter settings back to how they were before
             for p,(v,c) in zip(params,initial_state):
                 p.value = v
                 p.constant = c
-            self.create_likelihood()
+            self.update_likelihood()
         minimum.upper = upper
         minimum.lower = lower
         return minimum

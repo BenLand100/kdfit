@@ -24,7 +24,8 @@ class Calculation:
     def __init__(self, name, parents, constant=False):
         '''
         parents should be a list of Calculation objects this calculation depends on
-        constant sets the assumption that calculate(...) is always valid (no parents, but not an input)
+        constant sets the assumption that calculate(...) is always valid and 
+        never changes (no parents, but not an input)
         '''
         self.name = name
         self.parents = parents
@@ -41,35 +42,56 @@ class Calculation:
     
     def __repr__(self):
         return self.name
+
+class Parameter(Calculation):
+    '''
+    Represents an input to a System
+    
+    value is the initial or fixed value of the Parameter
+    constant sets whether the parameter is fixed (True) or floated (False)
+    '''
+    def __init__(self, name, value=None, fixed=True):
+        super().__init__(name, [], constant=False)
+        self.name = name
+        self.value = value
+        self.fixed = fixed
         
+    def link(self,param):
+        if param is None:
+            self.parents = []
+        else:
+            self.parents = [param]
+            self.constant = False
+            
+    def calculate(self, inputs, verbose=False):
+        if len(self.parents) == 1:
+            return inputs[0]
+        raise Exception('Should not calculate unlinked parameters')
+
 class System:
     '''
     Represents a series of calculations as a a collection of connected dependencies
     '''
     
-    def __init__(self,inputs=[],outputs=[],verbose=False):
+    def __init__(self,outputs=[],verbose=False):
         '''
-        inputs is a list of input Calculations (order used for argument to calculate)
         output is a list of output Calculations (order used for result of calculate)
-        
-        outputs should, in principle, depend on the inputs in some way
         '''
-    
-        self.inputs = inputs # input structures 
+        
         self.outputs = outputs # output structures
         
         parts = [] # sequentially stores all calcualtions in network
         children_indexes = [] # indexes of child instances in parts for each instance in parts
         parents_indexes = [] # indexes of parent instances in parts for each instance in parts
-        constant_indexes = []
+        input_indexes = [] # indexes of head (potential input) instances
         
         stack = deque()
         for child in self.outputs: # iterate over outputs to walk up tree
             if child not in parts:
                 child_index = len(parts)
                 parts.append(child)
-                if child.constant:
-                    constant_indexes.append(child_index)
+                if len(child.parents) == 0:
+                    input_indexes.append(child_index)
                 children_indexes.append([])
                 parents_indexes.append([])
             else:
@@ -81,8 +103,8 @@ class System:
             if parent not in parts:
                 index = len(parts)
                 parts.append(parent)
-                if parent.constant:
-                    constant_indexes.append(index)
+                if len(parent.parents) == 0:
+                    input_indexes.append(index)
                 children_indexes.append([])
                 parents_indexes.append([])
             else:
@@ -96,54 +118,95 @@ class System:
                     stack.append((index,parent,grandparent))
                 
         self.parts = np.asarray(parts,dtype=object)
-        self.input_indexes = np.asarray([parts.index(input) for input in self.inputs],dtype=np.int32) # indexes of input instances
         self.output_indexes = np.asarray([parts.index(output) for output in self.outputs],dtype=np.int32) # indexes of output instances
-        self.constant_indexes = np.asarray(constant_indexes,dtype=np.int32) # indexes constant instances
+        self.input_indexes = np.asarray(input_indexes,dtype=np.int32)
         self.children_indexes = [np.asarray(child_indexes,dtype=np.int32) for child_indexes in children_indexes]
         self.parents_indexes = [np.asarray(parent_indexes,dtype=np.int32) for parent_indexes in parents_indexes]
         
-        #FIXME eventually going to want to _avoid_ recalculating things that haven't changed
-        evaluation_order = []
-        input_children = np.unique(np.concatenate([self.children_indexes[i] for i in np.concatenate([self.input_indexes,self.constant_indexes])]))
-        not_evaluated  = np.ones_like(self.parts,dtype=bool)
-        not_evaluated[self.input_indexes] = False
-        not_evaluated[self.constant_indexes] = False
+        self.state = np.asarray([None for p in self.parts],dtype=object)
+        self.not_evaluated = np.ones_like(self.parts,dtype=bool)
+        
+    def classify_inputs(self):
+        '''
+        Sets all unlinked non-fixed Parameters to floated inputs,  and unlinked Calculations to fixed inputs. Returns a
+        list of both types.
+        '''
+        floated = []
+        fixed = []
+        floated_indexes = []
+        fixed_indexes = []
+        constant_indexes = []
+        for input_index in self.input_indexes:
+            p = self.parts[input_index]
+            if len(p.parents) == 0 and not p.constant:
+                if not isinstance(p,Parameter):
+                    raise Exception('Non-constant calculations with no parents must be parameters')
+                if not p.fixed:
+                    floated.append(p)
+                    floated_indexes.append(input_index)
+                else:
+                    fixed.append(p)
+                    fixed_indexes.append(input_index)
+            else:
+                constant_indexes.append(input_index)
+        self.floated_indexes = np.asarray(floated_indexes,dtype=np.int32)
+        self.fixed_indexes = np.asarray(fixed_indexes,dtype=np.int32)
+        self.constant_indexes = np.asarray(constant_indexes,dtype=np.int32)
+        return floated,fixed
+    
+    def calculate(self,floated,verbose=False):
+        recompute = []
+        for indexes,values in [(self.floated_indexes,floated),(self.fixed_indexes,[p.value for p in self.parts[self.fixed_indexes]])]:
+            for index,value in zip(indexes,values):
+                if self.state[index] is not value:
+                    if verbose:
+                        print('Changed input:',self.parts[index],self.state[index],'=>',value)
+                    self.not_evaluated[index] = False
+                    self.state[index] = value
+                    recompute.extend(self.children_indexes[index])
+        recompute.extend([constant_index for constant_index in self.constant_indexes if self.state[constant_index] is None])
+        recompute = np.unique(np.asarray(recompute,dtype=np.uint32))
+        if verbose:
+            print('Top-level recompute:',self.parts[recompute])
+        
         not_queued = np.ones_like(self.parts,dtype=bool)
-        not_queued[input_children] = False
-        recompute_queue = deque(input_children)
+        not_queued[recompute] = False
+        invalidate_queue = deque(recompute)
+        while len(invalidate_queue) > 0:
+            index = invalidate_queue.popleft()
+            not_queued[index] = True
+            if not self.not_evaluated[index]:
+                if verbose:
+                    print('Invalidate:',self.parts[index])
+                self.not_evaluated[index] = True
+                children = self.children_indexes[index]
+                children = children[not_queued[children]]
+                not_queued[children] = False
+                invalidate_queue.extend(children)
+        
+        not_queued = np.ones_like(self.parts,dtype=bool)
+        not_queued[recompute] = False
+        recompute_queue = deque(recompute)
         while len(recompute_queue) > 0:
             index = recompute_queue.popleft()
             not_queued[index] = True
-            inputs_not_evaluated = not_evaluated[self.parents_indexes[index]]
+            parents = self.parents_indexes[index]
+            inputs_not_evaluated = self.not_evaluated[parents]
+            if verbose:
+                print('Testing',self.parts[index],'parents:',
+                      ', '.join(['%s:%s'%(self.parts[i],self.not_evaluated[i]) for i in parents]))
             if np.any(inputs_not_evaluated): 
                 continue #not ready yet
-            evaluation_order.append(index)
-            not_evaluated[index] = False
+            if verbose:
+                print('Calculating',self.parts[index])
+            self.state[index] = self.parts[index].calculate(self.state[parents],verbose=verbose)
+            self.not_evaluated[index] = False
             children = self.children_indexes[index]
             children = children[not_queued[children]]
+            if verbose:
+                print('Queuing children:',self.parts[children])
             not_queued[children] = False
             recompute_queue.extend(children)
-        self.evaluation_order = np.asarray(evaluation_order,dtype=np.int32)
-        if verbose:
-            print('Evaluation order:',self.parts[self.evaluation_order])
-            
-    def calculate(self,inputs,verbose=False):
-        state = np.asarray([None for p in self.parts],dtype=object)
-        
-        for constant_index in zip(self.constant_indexes):
-            state[constant_index] = self.parts[constant_index].calculate(None,verbose=verbose)
-            if verbose:
-                print(self.parts[constant_index],state[constant_index])
-            
-        for input_index,input in zip(self.input_indexes,inputs):
-            state[input_index] = input
-            if verbose:
-                print(self.parts[input_index],state[input_index])
-        
-        for index in self.evaluation_order:
-            state[index] = self.parts[index].calculate(state[self.parents_indexes[index]],verbose=verbose)
-            if verbose:
-                print(self.parts[index],state[index])
 
-        outputs = [state[index] for index in self.output_indexes]
+        outputs = [self.state[index] for index in self.output_indexes]
         return outputs

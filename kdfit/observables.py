@@ -18,8 +18,9 @@
 import numpy as np
 from .term import UnbinnedNegativeLogLikelihoodFunction, BinnedNegativeLogLikelihoodFunction
 from .signal import Signal
+from .calculate import Calculation
 
-class Observables:
+class Observables(Calculation):
     '''
     Represents a multi-dimensional (multi-observable) dataset and the PDFs used
     to calculate its likelihood.
@@ -43,9 +44,12 @@ class Observables:
         self.shifts = []
         self.resolutions = []
         
-        self.x_ij = None
         self.binning = binning
         self.signals = {}
+        
+        self.last_data = None
+        self.data_param = self.analysis.add_parameter(name+'_data',fixed=False)
+        super().__init__(name,[self.data_param])
     
     def add_dimension(self,name,index,low,high):
         self.dimensions.append(name)
@@ -67,11 +71,8 @@ class Observables:
         self.signals[name] = sig
         return sig
         
-    def load_data(self,data_files):
-        x_nij = []
-        for fname in data_files:
-            x_nij.append(self.read_file(fname))
-        self.x_ij = np.concatenate(x_nij)
+    def load_data(self,x_ij):
+        self.x_ij = x_ij
         
     def eval_pdf(obs, x_j):
         return self.eval_pdf_multi([x_j])[0]
@@ -84,13 +85,11 @@ class Observables:
         if self.binning is None:
             return UnbinnedNegativeLogLikelihoodFunction(
                 self.name+'_UnbinnedLikelihood',
-                self.x_ij,
                 list(self.signals.values()),
                 self)
         else:
             return BinnedNegativeLogLikelihoodFunction(
                 self.name+'_BinnedLikelihood',
-                self.x_ij,
                 list(self.signals.values()),
                 self,
                 binning=self.binning)
@@ -100,3 +99,9 @@ class Observables:
         events = np.load(fname)
         t_ji = [events[:,idx] for idx in self.indexes]
         return np.asarray(t_ji).T
+        
+    def calculate(self,inputs,verbose=False):
+        if self.last_data is not inputs[0]:
+            self.load_data(inputs[0])
+            self.last_data = inputs[0]
+        return self.x_ij
