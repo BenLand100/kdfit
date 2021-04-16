@@ -216,11 +216,10 @@ class Signal(Calculation):
             int_k = cp.empty(a_kj.shape[0])
             block_size = 64
             grid_size = a_kj.shape[0]//block_size+1
-            Signal._int_kdpdf1_multi((grid_size,),(block_size,),(a_kj,b_kj,t_ij,h_ij,w_i,
-                                                                 t_ij.shape[0],
-                                                                 t_ij.shape[1],
-                                                                 a_kj.shape[0],
-                                                                 int_k))
+            Signal._int_kdpdf1_multi((grid_size,),(block_size,),
+                                     (a_kj,b_kj,t_ij,h_ij,w_i,
+                                     t_ij.shape[0], t_ij.shape[1], a_kj.shape[0],
+                                     int_k))
             int_k = int_k/cp.sum(self.w_i)
             return int_k.get() if get else int_k
         
@@ -255,10 +254,10 @@ class Signal(Calculation):
         res = cp.sum(w_i*cp.prod(Signal._inv_sqrt_2pi/h_ij,axis=1)*cp.exp(-0.5*cp.sum(cp.square((x_j-t_ij)/h_ij),axis=1)))
         return res if np == cp else res.get()
 
-    _kdpdf1_multi = cp.RawKernel(r'''
+    _kdpdf1_k = cp.RawKernel(r'''
         #define sqrt2pi 2.5066282746310007
         extern "C" __global__
-        void _kdpdf1_multi(const double* x_kj, const double* t_ij, const double* h_ij, const double* w_i, 
+        void _kdpdf1_k(const double* x_kj, const double* t_ij, const double* h_ij, const double* w_i, 
                            const int n_i, const int n_j, const int n_k, double* pdf_k) {
             /*
             2D arrays are passed to several of these arguments with row-major memory layout. 
@@ -286,24 +285,67 @@ class Signal(Calculation):
             for (int i = 0; i < n_i; i++) {
                 double prod = w_i[i];
                 double a = 0;
+                const int ij = i*n_j, kj = k*n_j;
                 for (int j = 0; j < n_j; j++) {
-                    prod /= h_ij[i*n_j+j]*sqrt2pi;
-                    double b = (x_kj[k*n_j+j]-t_ij[i*n_j+j])/h_ij[i*n_j+j];
+                    prod /= h_ij[ij+j]*sqrt2pi;
+                    double b = (x_kj[kj+j]-t_ij[ij+j])/h_ij[ij+j];
                     a += b * b;
                 }
                 pdf += prod*exp(-0.5*a);
             }
             pdf_k[k] = pdf;
         }
-        ''', '_kdpdf1_multi') if cp != np else None
-    
+        ''', '_kdpdf1_k') if cp != np else None
+        
+    _kdpdf1_ki = cp.RawKernel(r'''
+        #define sqrt2pi 2.5066282746310007
+        extern "C" __global__
+        void _kdpdf1_ki(const double* x_kj, const double* t_ij, const double* h_ij, const double* w_i, 
+                           const int n_i, const int n_j, const int n_k, double* pdf_ki) {
+            /*
+            2D arrays are passed to several of these arguments with row-major memory layout. 
+            
+            This CUDA kernel evaluates a Gaussian Kernel Density PDF at datapoints x_kj.
+                k - data point index
+                j - dimension index
+            t_ij is the events used to build the kernel density PDF
+                i - pdf point index
+                j - dimension index
+            h_ij is the bandwidth used to build the kernel density PDF
+                i - pdf point index
+                j - dimension index
+                
+            w_i is the weight of each event
+            n_i, n_j, n_k are the size of each index
+            
+            The resulting value is not normalized by the sum of weights, but otherwise
+            is normalized from (-infty,+infty), and stored in pdf_k.
+                k - data point index.
+            */
+            int k = blockDim.x * blockIdx.x + threadIdx.x;
+            int i = blockDim.y * blockIdx.y + threadIdx.y;
+            if (k >= n_k || i >= n_i) return;
+            double pdf = 0.0;
+            double prod = w_i[i];
+            double a = 0;
+            const int ij = i*n_j, kj = k*n_j;
+            for (int j = 0; j < n_j; j++) {
+                prod /= h_ij[ij+j]*sqrt2pi;
+                double b = (x_kj[kj+j]-t_ij[ij+j])/h_ij[ij+j];
+                a += b * b;
+            }
+            pdf += prod*exp(-0.5*a);
+            pdf_ki[k*n_i+i] = pdf;
+        }
+        ''', '_kdpdf1_ki') if cp != np else None
+        
     def eval_pdf(self, x_j, systs=None):
         '''
         Evaluates the signal's normalized PDF at one point. (Calls eval_pdf_multi.)
         '''
         return self.eval_pdf_multi([x_j],systs=systs)[0]
     
-    def eval_pdf_multi(self, x_kj, systs=None, get=True):
+    def eval_pdf_multi(self, x_kj, systs=None, kernel_2d=False, get=True):
         '''
         Evaluates the signal's normalized PDF at a list-like series of points. 
         
@@ -319,16 +361,28 @@ class Signal(Calculation):
         if np == cp:
             return np.asarray([Signal._kdpdf1(x_j,t_ij,h_ij,w_i) for x_j in x_kj])/norm
         else:
-            pdf_k = cp.empty(x_kj.shape[0])
-            block_size = 64
-            grid_size = x_kj.shape[0]//block_size+1
-            Signal._kdpdf1_multi((grid_size,),(block_size,),(x_kj,t_ij,h_ij,w_i,
-                                                             t_ij.shape[0],
-                                                             t_ij.shape[1],
-                                                             x_kj.shape[0],
-                                                             pdf_k))
-            pdf_k = pdf_k/cp.sum(self.w_i)/norm
-            return pdf_k.get() if get else pdf_k
+            if kernel_2d: # faster for fewer points, i*k memory requirements
+                pdf_ki = cp.empty((x_kj.shape[0],t_ij.shape[0]))
+                block_size = 32
+                k_grid_size = pdf_ki.shape[0]//block_size+1
+                i_grid_size = pdf_ki.shape[1]//block_size+1
+                Signal._kdpdf1_ki((k_grid_size,i_grid_size),(block_size,block_size),
+                                  (x_kj,t_ij,h_ij,w_i,
+                                   t_ij.shape[0], t_ij.shape[1], x_kj.shape[0],
+                                   pdf_ki))
+                pdf_k = cp.sum(pdf_ki,axis=1)
+                pdf_k = pdf_k/cp.sum(self.w_i)/norm
+                return pdf_k.get() if get else pdf_k
+            else:
+                pdf_k = cp.empty(x_kj.shape[0])
+                block_size = 64
+                grid_size = x_kj.shape[0]//block_size+1
+                Signal._kdpdf1_k((grid_size,),(block_size,),
+                                 (x_kj,t_ij,h_ij,w_i,
+                                  t_ij.shape[0], t_ij.shape[1], x_kj.shape[0],
+                                  pdf_k))
+                pdf_k = pdf_k/cp.sum(self.w_i)/norm
+                return pdf_k.get() if get else pdf_k
     
     def _transform_syst(self,inputs):
         '''
