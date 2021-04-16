@@ -46,7 +46,7 @@ class Signal(Calculation):
         '''
         Integrates the raw PDF between points a_j and b_j. (Calls int_pdf_multi.)
         '''
-        return int_pdf_multi([a_j],[b_k],systs=systs)[0]
+        return self.int_pdf_multi(cp.asarray([a_j]),cp.asarray([b_j]),systs=systs)[0]
     
     def int_pdf_multi(self,a_kj,b_kj,systs=None,get=False):
         '''
@@ -59,7 +59,7 @@ class Signal(Calculation):
         '''
         Evaluates the normalized PDF at one point. (Calls eval_pdf_multi.)
         '''
-        return self.eval_pdf_multi([x_j],systs=systs)[0]
+        return self.eval_pdf_multi(cp.asarray([x_j]),systs=systs)[0]
     
     def eval_pdf_multi(self, x_kj, systs=None, get=True):
         '''
