@@ -17,7 +17,7 @@
 
 import numpy as np
 from .term import UnbinnedNegativeLogLikelihoodFunction, BinnedNegativeLogLikelihoodFunction
-from .signal import Signal
+from .signal import Signal,KernelDensityPDF
 from .calculate import Calculation
 
 class Observables(Calculation):
@@ -63,10 +63,10 @@ class Observables(Calculation):
         self.resolutions.append(resolution)
         return scale,shift,resolution
         
-    def add_signal(self,name,*args,**kwargs):
+    def add_signal(self,name,*args,pdf=KernelDensityPDF,**kwargs):
         if name in self.signals:
             raise Exception('Duplicate name: '+name)
-        sig = Signal(name,self,*args,**kwargs)
+        sig = pdf(name,self,*args,**kwargs)
         self.signals[name] = sig
         return sig
         

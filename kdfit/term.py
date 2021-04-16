@@ -84,9 +84,6 @@ class BinnedNegativeLogLikelihoodFunction(Calculation):
         super().__init__(name,n_evs+signals+[observables])
         self.last_x_kj = None
     
-    def _bin_iters(self):
-        return first,second
-    
     def calculate(self, inputs, verbose=False):
         n_evs = inputs[:len(self.signals)]
         signal_systs = inputs[len(self.signals):-1]

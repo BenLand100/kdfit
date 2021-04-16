@@ -34,17 +34,63 @@ class Signal(Calculation):
     `calculate` should be passed as the `systs` arugment to eval_pdf functions.
     '''
 
-    def __init__(self,name,observables,value=None,reflect_axes=None):
+    def __init__(self,name,observables,inputs,value=None):
+        super().__init__(name,inputs)
         self.observables = observables
+        self.nev_param = observables.analysis.add_parameter(name+'_nev',value=value,fixed=False)
+        
+    def load_mc(self,t_ij):
+        raise Exception('PDF MC loading not implemented')
+        
+    def int_pdf(self,a_j,b_j,systs=None):
+        '''
+        Integrates the raw PDF between points a_j and b_j. (Calls int_pdf_multi.)
+        '''
+        return int_pdf_multi([a_j],[b_k],systs=systs)[0]
+    
+    def int_pdf_multi(self,a_kj,b_kj,systs=None,get=False):
+        '''
+        Integrates the raw PDF between k pairs of points a_j and b_j.
+        May return CuPy array if get is set to False (default True).
+        '''
+        raise Exception('PDF integration not implemented')
+        
+    def eval_pdf(self, x_j, systs=None):
+        '''
+        Evaluates the normalized PDF at one point. (Calls eval_pdf_multi.)
+        '''
+        return self.eval_pdf_multi([x_j],systs=systs)[0]
+    
+    def eval_pdf_multi(self, x_kj, systs=None, get=True):
+        '''
+        Evaluates the normalized PDF at k points.
+        May return CuPy array if get is set to False (default True).
+        '''
+        raise Exception('PDF integration not implemented')
+    
+    def calculate(self,inputs,verbose=False):
+        '''
+        Calculates the systematically transformed PDF weights, events, and 
+        bandwidths. Result is used as the `systs` keyword argument to other 
+        methods.
+        '''
+        raise Exception('PDF systematic calculation not implemented')
+        
+class KernelDensityPDF(Signal):
+    '''
+    Contains the logic to evaluate a PDF using an adaptive kernel density 
+    estimation algorithm with GPU acceleration
+    '''
+
+    def __init__(self,name,observables,reflect_axes=None,value=None):
         self.reflect_axes = reflect_axes if reflect_axes is not None else [False for _ in range(len(observables.dimensions))]
-        self.a = cp.asarray([l for l in self.observables.lows])
-        self.b = cp.asarray([h for h in self.observables.highs])
-        self.nev_param = self.observables.analysis.add_parameter(name+'_nev',value=value,fixed=False)
+        self.a = cp.asarray([l for l in observables.lows])
+        self.b = cp.asarray([h for h in observables.highs])
         self.systematics = [syst for dim_systs in zip(observables.scales,observables.shifts,observables.resolutions) for syst in dim_systs]
         # Should be linked to something that loads MC when called (DataLoader)
-        self.mc_param = self.observables.analysis.add_parameter(name+'_mc',fixed=False)
+        self.mc_param = observables.analysis.add_parameter(name+'_mc',fixed=False)
         self.cur_mc = None
-        super().__init__(name,[self.mc_param]+self.systematics)
+        super().__init__(name,observables,[self.mc_param]+self.systematics,value=value)
         
     def load_mc(self,t_ij):
         for j,(l,h) in enumerate(zip(self.observables.lows,self.observables.highs)):
@@ -73,7 +119,7 @@ class Signal(Calculation):
         h_j are the bandwidths for all PDF events in dimension j
         '''
         w = cp.sum(w_i)
-        h_j_prod = cp.prod(Signal._inv_sqrt_2pi/h_j)
+        h_j_prod = cp.prod(KernelDensityPDF._inv_sqrt_2pi/h_j)
         res = h_j_prod*cp.sum(w_i*cp.exp(-0.5*cp.sum(cp.square((x_j-t_ij)/h_j),axis=1)))/w
         return res if np == cp else res.get()
     
@@ -107,14 +153,14 @@ class Signal(Calculation):
         n = self.t_ij.shape[0]
         h_j = (4/3/n)**(1/5)*self.sigma_j
         if cp == np:
-            return np.asarray([Signal._kdpdf0(x_j,self.t_ij,h_j,self.w_i) for x_j in x_kj])
+            return np.asarray([KernelDensityPDF._kdpdf0(x_j,self.t_ij,h_j,self.w_i) for x_j in x_kj])
         else:
             x_kj = cp.asarray(x_kj)
             h_j = cp.ascontiguousarray(cp.asarray(h_j))
             pdf_k = cp.empty(x_kj.shape[0])
             block_size = 64
             grid_size = x_kj.shape[0]//block_size+1
-            Signal._kdpdf0_multi((grid_size,),(block_size,),(x_kj,self.t_ij,h_j,w_i,
+            KernelDensityPDF._kdpdf0_multi((grid_size,),(block_size,),(x_kj,self.t_ij,h_j,w_i,
                                                              self.t_ij.shape[0],self.t_ij.shape[1],x_kj.shape[0],
                                                              pdf_k))
             pdf_k = pdf_k/cp.sum(self.w_i)
@@ -151,7 +197,7 @@ class Signal(Calculation):
         n = t_ij.shape[0]
         d = t_ij.shape[1]
         res = cp.sum(w_i*cp.prod(
-                erf((b_j-t_ij)/h_ij/Signal._sqrt2) - erf((a_j-t_ij)/h_ij/Signal._sqrt2)
+                erf((b_j-t_ij)/h_ij/KernelDensityPDF._sqrt2) - erf((a_j-t_ij)/h_ij/KernelDensityPDF._sqrt2)
             ,axis=1))/w/(2**d)
         return res.get() if get else res
     
@@ -197,13 +243,6 @@ class Signal(Calculation):
             int_k[k] = integral/power;
         }
         ''', '_int_kdpdf1_multi') if cp != np else None
-        
-    def int_pdf(self,a_j,b_j,systs=None):
-        if systs is None:
-            t_ij,h_ij,w_i = self.t_ij,self.h_ij,self.w_i
-        else:
-            t_ij,h_ij,w_i = systs
-        return Signal._int_kdpdf1(a_j,b_j,t_ij,h_ij,w_i)
     
     def int_pdf_multi(self,a_kj,b_kj,systs=None,get=False):
         if systs is None:
@@ -211,12 +250,12 @@ class Signal(Calculation):
         else:
             t_ij,h_ij,w_i = systs
         if cp == np:
-            return [Signal._int_kdpdf1(a_j,b_j,t_ij,h_ij,w_i) for a_j,b_j in zip(a_kj,b_kj)]
+            return [KernelDensityPDF._int_kdpdf1(a_j,b_j,t_ij,h_ij,w_i) for a_j,b_j in zip(a_kj,b_kj)]
         else:
             int_k = cp.empty(a_kj.shape[0])
             block_size = 64
             grid_size = a_kj.shape[0]//block_size+1
-            Signal._int_kdpdf1_multi((grid_size,),(block_size,),
+            KernelDensityPDF._int_kdpdf1_multi((grid_size,),(block_size,),
                                      (a_kj,b_kj,t_ij,h_ij,w_i,
                                      t_ij.shape[0], t_ij.shape[1], a_kj.shape[0],
                                      int_k))
@@ -238,7 +277,7 @@ class Signal(Calculation):
             h_ij=self.h_ij
         if w_i is None:
             w_i=self.w_i
-        return Signal._int_kdpdf1(a,b,t_ij,h_ij,w_i)
+        return KernelDensityPDF._int_kdpdf1(a,b,t_ij,h_ij,w_i)
     
         
     def _kdpdf1(x_j,t_ij,h_ij,w_i):
@@ -251,7 +290,7 @@ class Signal(Calculation):
         h_ij are the bandwidths of each PDF event i in dimension j
         w_i are the weights of each PDF event
         '''
-        res = cp.sum(w_i*cp.prod(Signal._inv_sqrt_2pi/h_ij,axis=1)*cp.exp(-0.5*cp.sum(cp.square((x_j-t_ij)/h_ij),axis=1)))
+        res = cp.sum(w_i*cp.prod(KernelDensityPDF._inv_sqrt_2pi/h_ij,axis=1)*cp.exp(-0.5*cp.sum(cp.square((x_j-t_ij)/h_ij),axis=1)))
         return res if np == cp else res.get()
 
     _kdpdf1_k = cp.RawKernel(r'''
@@ -338,19 +377,13 @@ class Signal(Calculation):
             pdf_ki[k*n_i+i] = pdf;
         }
         ''', '_kdpdf1_ki') if cp != np else None
-        
-    def eval_pdf(self, x_j, systs=None):
-        '''
-        Evaluates the signal's normalized PDF at one point. (Calls eval_pdf_multi.)
-        '''
-        return self.eval_pdf_multi([x_j],systs=systs)[0]
     
     def eval_pdf_multi(self, x_kj, systs=None, kernel_2d=False, get=True):
         '''
         Evaluates the signal's normalized PDF at a list-like series of points. 
         
         If CuPy is present on the system, a CUDA kernel will be used to run this
-        calculation on the default GPU. (See: Signal._kdpdf1_multi)
+        calculation on the default GPU. (See: KernelDensityPDF._kdpdf1_multi)
         '''
         if systs is None:
             t_ij,h_ij,w_i = self.t_ij,self.h_ij,self.w_i
@@ -359,14 +392,14 @@ class Signal(Calculation):
         x_kj = cp.asarray(x_kj)
         norm = cp.asarray(self._normalization(t_ij=t_ij,h_ij=h_ij,w_i=w_i))
         if np == cp:
-            return np.asarray([Signal._kdpdf1(x_j,t_ij,h_ij,w_i) for x_j in x_kj])/norm
+            return np.asarray([KernelDensityPDF._kdpdf1(x_j,t_ij,h_ij,w_i) for x_j in x_kj])/norm
         else:
             if kernel_2d: # faster for fewer points, i*k memory requirements
                 pdf_ki = cp.empty((x_kj.shape[0],t_ij.shape[0]))
                 block_size = 32
                 k_grid_size = pdf_ki.shape[0]//block_size+1
                 i_grid_size = pdf_ki.shape[1]//block_size+1
-                Signal._kdpdf1_ki((k_grid_size,i_grid_size),(block_size,block_size),
+                KernelDensityPDF._kdpdf1_ki((k_grid_size,i_grid_size),(block_size,block_size),
                                   (x_kj,t_ij,h_ij,w_i,
                                    t_ij.shape[0], t_ij.shape[1], x_kj.shape[0],
                                    pdf_ki))
@@ -377,7 +410,7 @@ class Signal(Calculation):
                 pdf_k = cp.empty(x_kj.shape[0])
                 block_size = 64
                 grid_size = x_kj.shape[0]//block_size+1
-                Signal._kdpdf1_k((grid_size,),(block_size,),
+                KernelDensityPDF._kdpdf1_k((grid_size,),(block_size,),
                                  (x_kj,t_ij,h_ij,w_i,
                                   t_ij.shape[0], t_ij.shape[1], x_kj.shape[0],
                                   pdf_k))
@@ -429,3 +462,83 @@ class Signal(Calculation):
         t_ij = self._transform_syst(systs)
         h_ij = self._conv_syst(systs)
         return t_ij,h_ij,w_i
+        
+class BinnedPDF(Signal):
+    '''
+    Contains the logic to evaluate a PDF using binned histograms.
+    '''
+
+    def __init__(self,name,observables,binning,value=None):
+        self.systematics = [syst for dim_systs in zip(observables.scales,observables.shifts,observables.resolutions) for syst in dim_systs]
+        # Should be linked to something that loads MC when called (DataLoader)
+        self.mc_param = observables.analysis.add_parameter(name+'_mc',fixed=False)
+        self.cur_mc = None
+        self.binning = binning
+        super().__init__(name,observables,[self.mc_param]+self.systematics,value=value)
+        
+    def bin_mc(self,t_ij,w_i):
+        '''
+        '''
+        #FIXME implement
+        
+    def load_mc(self,t_ij):
+        self.t_ij = cp.ascontiguousarray(cp.asarray(t_ij))
+        self.w_i = cp.ones(self.t_ij.shape[0])
+        self.counts = self.bin_mc(self.t_ij,self.w_i)
+
+    def int_pdf_multi(self,a_kj,b_kj,systs=None,get=False):
+        '''
+        '''
+        counts = self.counts if systs is None else systs
+        #FIXME implement
+
+    def eval_pdf_multi(self, x_kj, systs=None, kernel_2d=False, get=True):
+        '''
+        Evaluates the signal's normalized PDF at a list-like series of points. 
+        '''
+        counts = self.counts if systs is None else systs
+        #FIXME implement
+    
+    def _transform_syst(self,inputs,t_ij=None):
+        '''
+        Scales and shifts datapoints by those systematics. Shift is in the units
+        of the scaled dimension.
+        '''
+        if t_ij is None:
+            t_ij = self.t_ij
+        scales = inputs[0:3*len(self.observables.scales):3]
+        shifts = inputs[1:3*len(self.observables.shifts):3]
+        return scales*t_ij+shifts
+        
+    def _weight_syst(self,inputs):
+        '''
+        Reweight events. (e.g. neutrino survival probability would be 
+        implemented here.)
+        '''
+        return self.w_i
+        
+    def _conv_syst(self,inputs,t_ij=None):
+        '''
+        Convolves the bandwidths with the resolutions scaled by the scale
+        systematics. Resolutions are in the units of the scaled dimension.
+        '''
+        if t_ij is None:
+            t_ij = self.t_ij
+        scales = inputs[0:3*len(self.observables.scales):3]
+        resolutions = inputs[2:3*len(self.observables.shifts):3]
+        resolutions = resolutions*scales
+        return np.random.normal(t_ij,resolutions)
+        
+    def calculate(self,inputs,verbose=False):
+        '''
+        Calculates the systematically transformed PDF
+        '''
+        #even if calculate is rerun, only reload mc if the loader changed
+        if self.cur_mc is not inputs[0]:
+            self.load_mc(inputs[0]())
+            self.cur_mc = inputs[0]
+        systs = cp.asarray(inputs[1:],dtype=cp.float64)
+        w_i = self._weight_syst(systs)
+        t_ij = self._transform_syst(systs)
+        t_ij = self._conv_syst(systs,t_ij=t_ij)
+        return self.bin_mc(self.t_ij,self.w_i)
