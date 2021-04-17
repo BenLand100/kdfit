@@ -51,7 +51,7 @@ class PDFBinner(Calculation):
                 self.bin_ints = systs
             else:
                 norm = self.pdf.int_pdf(self.bin_edges[:,0],self.bin_edges[:,-1],systs=systs) 
-                self.bin_ints = self.pdf.int_pdf_multi(self.a_kj,self.b_kj,systs=systs)/self.bin_vol/norm
+                self.bin_ints = self.pdf.int_pdf_multi(self.a_kj,self.b_kj,systs=systs)/norm
             self.last_systs = systs
         return self.bin_ints
             

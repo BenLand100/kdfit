@@ -108,7 +108,8 @@ class BinnedNegativeLogLikelihoodFunction(Calculation):
             print('Evaluate:',', '.join(['%0.3f'%s for s in n_evs]))
         expected = cp.sum(cp.asarray([n*bin_ints for n,bin_ints in zip(n_evs,binned_signals)]),axis=0)
         expected = expected.reshape(self.counts.shape)
-        res = cp.sum(n_evs) - cp.sum(self.counts*cp.log(expected))
+        mask = expected != 0
+        res = cp.sum(n_evs) - cp.sum(self.counts[mask]*cp.log(expected[mask]))
         if verbose:
             print('NLL:',res)
         return res if np == cp else res.get()

@@ -16,6 +16,7 @@
 #  along with kdfit.  If not, see <https://www.gnu.org/licenses/>.
 
 import numpy as np
+import itertools as it
 try:
     import cupy as cp
     from cupyx.scipy.special import erf
@@ -468,18 +469,28 @@ class BinnedPDF(Signal):
     Contains the logic to evaluate a PDF using binned histograms.
     '''
 
-    def __init__(self,name,observables,binning,value=None):
+    def __init__(self,name,observables,binning=None,value=None):
         self.systematics = [syst for dim_systs in zip(observables.scales,observables.shifts,observables.resolutions) for syst in dim_systs]
         # Should be linked to something that loads MC when called (DataLoader)
         self.mc_param = observables.analysis.add_parameter(name+'_mc',fixed=False)
         self.cur_mc = None
-        self.binning = binning
+        self.binning = binning        
+        if type(binning) == int:
+            self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],binning) for j in range(len(observables.dimensions))]
+        else:
+            self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],bins) for j,bins in enumerate(binning)]
+        self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges))
+        self.indexes = [np.arange(len(edges)) for edges in self.bin_edges]
+        self.a_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:, :-1])]))
+        self.b_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:,1:  ])]))
+        self.bin_vol = cp.ascontiguousarray(cp.prod(self.b_kj-self.a_kj,axis=1))
         super().__init__(name,observables,[self.mc_param]+self.systematics,value=value)
         
     def bin_mc(self,t_ij,w_i):
         '''
         '''
-        #FIXME implement
+        counts,_ = np.histogramdd(cp.asnumpy(t_ij),bins=cp.asnumpy(self.bin_edges),weights=cp.asnumpy(w_i))
+        return (cp.asarray(counts).flatten()/self.bin_vol/cp.sum(cp.asarray(counts))).reshape(counts.shape)
         
     def load_mc(self,t_ij):
         self.t_ij = cp.ascontiguousarray(cp.asarray(t_ij))
@@ -490,14 +501,17 @@ class BinnedPDF(Signal):
         '''
         '''
         counts = self.counts if systs is None else systs
-        #FIXME implement
+        raise Exception('Not implemented')
 
     def eval_pdf_multi(self, x_kj, systs=None, kernel_2d=False, get=True):
         '''
         Evaluates the signal's normalized PDF at a list-like series of points. 
         '''
         counts = self.counts if systs is None else systs
-        #FIXME implement
+        x_kj = cp.asarray(x_kj)
+        rescaled = [np.interp(x_k.get(),edges.get(),index) for x_k,edges,index in zip(x_kj.T,self.bin_edges,self.indexes)]
+        coordinates = np.asarray(rescaled,dtype=np.uint32)
+        return counts[tuple(coordinates)].get() if get else counts[tuple(coordinates)]
     
     def _transform_syst(self,inputs,t_ij=None):
         '''
@@ -527,7 +541,7 @@ class BinnedPDF(Signal):
         scales = inputs[0:3*len(self.observables.scales):3]
         resolutions = inputs[2:3*len(self.observables.shifts):3]
         resolutions = resolutions*scales
-        return np.random.normal(t_ij,resolutions)
+        return cp.random.normal(t_ij,resolutions)
         
     def calculate(self,inputs,verbose=False):
         '''
