@@ -19,6 +19,10 @@ from .calculate import Calculation
 
 import h5py
 import numpy as np
+try:    
+    import uproot4
+except:
+    pass
 
 class DataLoader(Calculation):
     '''
@@ -84,3 +88,26 @@ class NPYData(DataLoader):
                 raise Exception('Unknown ordering')
         return np.concatenate(x_nij)
                     
+class SNOPlusNTuple(DataLoader):
+
+    def __init__(self,name,filenames,branches):
+        super().__init__(name)
+        self.filenames = filenames
+        self.branches = branches
+        
+    def __call__(self):
+        print('Loading:',', '.join(self.filenames))
+        x_nij = []
+        events = 0
+        for fname in self.filenames:
+            try:
+                with uproot4.open(fname) as froot:
+                    x_ji = np.asarray([froot['output'][branch].array() for branch in self.branches])
+                    x_nij.append(x_ji.T)
+                    events += x_ji.shape[1]
+                if events > 100000:
+                    break
+            except:
+                print('Couldn''t read',fname)
+        print('Loaded',events,'events')
+        return np.concatenate(x_nij)

@@ -94,9 +94,11 @@ class KernelDensityPDF(Signal):
         super().__init__(name,observables,[self.mc_param]+self.systematics,value=value)
         
     def load_mc(self,t_ij):
+        print('before cuts',t_ij.shape)
         for j,(l,h) in enumerate(zip(self.observables.lows,self.observables.highs)):
             in_bounds = np.logical_and(t_ij[:,j] > l,t_ij[:,j] < h)
             t_ij = t_ij[in_bounds]
+        print('after cuts',t_ij.shape)
         t_ij = cp.asarray(t_ij)
         self.sigma_j = cp.std(t_ij,axis=0)
         for j,(l,h,refl) in enumerate(zip(self.observables.lows,self.observables.highs,self.reflect_axes)):
@@ -469,11 +471,12 @@ class BinnedPDF(Signal):
     Contains the logic to evaluate a PDF using binned histograms.
     '''
 
-    def __init__(self,name,observables,binning=None,value=None):
+    def __init__(self,name,observables,binning=None,interpolation=None,value=None):
         self.systematics = [syst for dim_systs in zip(observables.scales,observables.shifts,observables.resolutions) for syst in dim_systs]
         # Should be linked to something that loads MC when called (DataLoader)
         self.mc_param = observables.analysis.add_parameter(name+'_mc',fixed=False)
         self.cur_mc = None
+        self.interpolation = interpolation
         self.binning = binning        
         if type(binning) == int:
             self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],binning) for j in range(len(observables.dimensions))]
@@ -483,6 +486,7 @@ class BinnedPDF(Signal):
         self.indexes = [np.arange(len(edges)) for edges in self.bin_edges]
         self.a_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:, :-1])]))
         self.b_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:,1:  ])]))
+        self.bin_centers = cp.ascontiguousarray(cp.asarray([(edges[:-1]+edges[1:])/2 for edges in self.bin_edges]))
         self.bin_vol = cp.ascontiguousarray(cp.prod(self.b_kj-self.a_kj,axis=1))
         super().__init__(name,observables,[self.mc_param]+self.systematics,value=value)
         
@@ -503,15 +507,21 @@ class BinnedPDF(Signal):
         counts = self.counts if systs is None else systs
         raise Exception('Not implemented')
 
-    def eval_pdf_multi(self, x_kj, systs=None, kernel_2d=False, get=True):
+    def eval_pdf_multi(self, x_kj, systs=None, get=True):
         '''
         Evaluates the signal's normalized PDF at a list-like series of points. 
         '''
         counts = self.counts if systs is None else systs
-        x_kj = cp.asarray(x_kj)
-        rescaled = [np.interp(x_k.get(),edges.get(),index) for x_k,edges,index in zip(x_kj.T,self.bin_edges,self.indexes)]
-        coordinates = np.asarray(rescaled,dtype=np.uint32)
-        return counts[tuple(coordinates)].get() if get else counts[tuple(coordinates)]
+        if self.interpolation is None:
+            x_kj = cp.asarray(x_kj)
+            rescaled = [np.interp(x_k.get(),edges.get(),index) for x_k,edges,index in zip(x_kj.T,self.bin_edges,self.indexes)]
+            coordinates = np.asarray(rescaled,dtype=np.uint32)
+            return counts[tuple(coordinates)].get() if get else counts[tuple(coordinates)]
+        elif self.interpolation == 'linear': #FIXME could do this on GPU
+            x_kj = np.asarray(x_kj)
+            from scipy.interpolate import RegularGridInterpolator
+            interp = RegularGridInterpolator(cp.asnumpy(self.bin_centers),cp.asnumpy(counts),bounds_error=False,fill_value=0)
+            return interp(x_kj)
     
     def _transform_syst(self,inputs,t_ij=None):
         '''
