@@ -94,20 +94,27 @@ class KernelDensityPDF(Signal):
         super().__init__(name,observables,[self.mc_param]+self.systematics,value=value)
         
     def load_mc(self,t_ij):
-        print('before cuts',t_ij.shape)
         for j,(l,h) in enumerate(zip(self.observables.lows,self.observables.highs)):
             in_bounds = np.logical_and(t_ij[:,j] > l,t_ij[:,j] < h)
             t_ij = t_ij[in_bounds]
-        print('after cuts',t_ij.shape)
         t_ij = cp.asarray(t_ij)
         self.sigma_j = cp.std(t_ij,axis=0)
         for j,(l,h,refl) in enumerate(zip(self.observables.lows,self.observables.highs,self.reflect_axes)):
             if not refl:
                 continue
-            reflected_low = cp.copy(t_ij)
-            reflected_low[:,j] = 2*l - t_ij[:,j]
-            reflected_high = cp.copy(t_ij)
-            reflected_high[:,j] = 2*h - t_ij[:,j]
+            if type(refl) == tuple:
+                low,high = refl
+                mask = t_ij[:,j] < low
+                reflected_low = cp.copy(t_ij[mask,:])
+                reflected_low[:,j] = 2*l - reflected_low[:,j]
+                mask = t_ij[:,j] > high
+                reflected_high = cp.copy(t_ij[mask,:])
+                reflected_high[:,j] = 2*h - reflected_high[:,j]
+            else:
+                reflected_low = cp.copy(t_ij)
+                reflected_low[:,j] = 2*l - t_ij[:,j]
+                reflected_high = cp.copy(t_ij)
+                reflected_high[:,j] = 2*h - t_ij[:,j]
             t_ij = cp.concatenate([t_ij,reflected_low,reflected_high])
         self.t_ij = cp.ascontiguousarray(t_ij)
         self.w_i = cp.ones(self.t_ij.shape[0])
@@ -481,7 +488,10 @@ class BinnedPDF(Signal):
         if type(binning) == int:
             self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],binning) for j in range(len(observables.dimensions))]
         else:
-            self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],bins) for j,bins in enumerate(binning)]
+            if type(binning[0]) == int:
+                self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],bins) for j,bins in enumerate(binning)]
+            else:
+                self.bin_edges = binning
         self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges))
         self.indexes = [np.arange(len(edges)) for edges in self.bin_edges]
         self.a_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:, :-1])]))
@@ -518,7 +528,7 @@ class BinnedPDF(Signal):
             coordinates = np.asarray(rescaled,dtype=np.uint32)
             return counts[tuple(coordinates)].get() if get else counts[tuple(coordinates)]
         elif self.interpolation == 'linear': #FIXME could do this on GPU
-            x_kj = np.asarray(x_kj)
+            x_kj = cp.asnumpy(x_kj)
             from scipy.interpolate import RegularGridInterpolator
             interp = RegularGridInterpolator(cp.asnumpy(self.bin_centers),cp.asnumpy(counts),bounds_error=False,fill_value=0)
             return interp(x_kj)

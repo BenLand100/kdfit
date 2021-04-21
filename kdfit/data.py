@@ -45,19 +45,31 @@ class HDF5Data(DataLoader):
     larger dataset.
     '''
 
-    def __init__(self,name,filenames,datasets):
+    def __init__(self,name,filenames,datasets,max_events=None):
         super().__init__(name)
         self.filenames = filenames
         self.datasets = datasets
+        self.max_events = max_events
     
     def __call__(self):
         print('Loading:',', '.join(self.filenames))
         data = [[] for ds in self.datasets]
         for fname in self.filenames:
             with h5py.File(fname,'r') as hf:
-                for j,ds in enumerate(datasets):
-                    data[j].extend(hf[ds])
-        return np.asarray(data)
+                total = len(data[0])
+                for j,ds in enumerate(self.datasets):
+                    if self.max_events is not None:
+                        to_read = self.max_events - total 
+                        ds = hf[ds]
+                        if total > ds.shape[0]:
+                            data[j].extend(ds[:])
+                        else:
+                            data[j].extend(ds[:to_read])
+                    else:
+                        data[j].extend(hf[ds][:])
+            if len(data[0]) >= self.max_events:
+                break
+        return np.asarray(data)[:,:self.max_events].T
         
 class NPYData(DataLoader):
     '''
