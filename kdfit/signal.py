@@ -83,7 +83,23 @@ class KernelDensityPDF(Signal):
     estimation algorithm with GPU acceleration
     '''
 
-    def __init__(self,name,observables,reflect_axes=None,value=None):
+    def __init__(self,name,observables,reflect_axes=None,value=None,bootstrap_binning=None,rho=1.0):
+        self.rho = rho
+        self.bootstrap_binning = bootstrap_binning
+        if bootstrap_binning is not None:
+            if type(bootstrap_binning) == int:
+                self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],bootstrap_binning) for j in range(len(observables.dimensions))]
+            else:
+                if type(bootstrap_binning[0]) == int:
+                    self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],bins) for j,bins in enumerate(bootstrap_binning)]
+                else:
+                    self.bin_edges = bootstrap_binning
+            self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges))
+            self.indexes = [np.arange(len(edges)) for edges in self.bin_edges]
+            self.a_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:, :-1])]))
+            self.b_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:,1:  ])]))
+            self.bin_centers = cp.ascontiguousarray(cp.asarray([(edges[:-1]+edges[1:])/2 for edges in self.bin_edges]))
+            self.bin_vol = cp.ascontiguousarray(cp.prod(self.b_kj-self.a_kj,axis=1))
         self.reflect_axes = reflect_axes if reflect_axes is not None else [False for _ in range(len(observables.dimensions))]
         self.a = cp.asarray([l for l in observables.lows])
         self.b = cp.asarray([h for h in observables.highs])
@@ -97,29 +113,44 @@ class KernelDensityPDF(Signal):
         for j,(l,h) in enumerate(zip(self.observables.lows,self.observables.highs)):
             in_bounds = np.logical_and(t_ij[:,j] > l,t_ij[:,j] < h)
             t_ij = t_ij[in_bounds]
-        t_ij = cp.asarray(t_ij)
-        self.sigma_j = cp.std(t_ij,axis=0)
+        self.t_ij = cp.asarray(t_ij)
+        self.w_i = cp.ones(t_ij.shape[0])
+        if self.bootstrap_binning is not None:
+            counts,_ = np.histogramdd(cp.asnumpy(self.t_ij),bins=cp.asnumpy(self.bin_edges),weights=cp.asnumpy(self.w_i))
+            self.counts = (cp.asarray(counts).flatten()/self.bin_vol/cp.sum(cp.asarray(counts))).reshape(counts.shape)
+        self.sigma_j = cp.std(self.t_ij,axis=0)
+        self.h_ij = self._adapt_bandwidth()
         for j,(l,h,refl) in enumerate(zip(self.observables.lows,self.observables.highs,self.reflect_axes)):
             if not refl:
                 continue
             if type(refl) == tuple:
                 low,high = refl
-                mask = t_ij[:,j] < low
-                reflected_low = cp.copy(t_ij[mask,:])
-                reflected_low[:,j] = 2*l - reflected_low[:,j]
-                mask = t_ij[:,j] > high
-                reflected_high = cp.copy(t_ij[mask,:])
-                reflected_high[:,j] = 2*h - reflected_high[:,j]
+                mask = self.t_ij[:,j] < low
+                t_ij_reflected_low = cp.copy(self.t_ij[mask,:])
+                h_ij_reflected_low = self.h_ij[mask,:]
+                w_i_reflected_low = self.w_i[mask,:]
+                t_ij_reflected_low[:,j] = 2*l - t_ij_reflected_low[:,j]
+                mask = self.t_ij[:,j] > high
+                t_ij_reflected_high = cp.copy(self.t_ij[mask,:])
+                h_ij_reflected_high = self.h_ij[mask,:]
+                w_i_reflected_high = self.w_i[mask,:]
+                t_ij_reflected_high[:,j] = 2*h - t_ij_reflected_high[:,j]
             else:
-                reflected_low = cp.copy(t_ij)
-                reflected_low[:,j] = 2*l - t_ij[:,j]
-                reflected_high = cp.copy(t_ij)
-                reflected_high[:,j] = 2*h - t_ij[:,j]
-            t_ij = cp.concatenate([t_ij,reflected_low,reflected_high])
-        self.t_ij = cp.ascontiguousarray(t_ij)
-        self.w_i = cp.ones(self.t_ij.shape[0])
-        self.h_ij = self.adapt_bandwidth()
-        
+                t_ij_reflected_low = cp.copy(self.t_ij)
+                h_ij_reflected_low = self.h_ij
+                w_i_reflected_low = self.w_i
+                t_ij_reflected_low[:,j] = 2*l - self.t_ij[:,j]
+                t_ij_reflected_high = cp.copy(self.t_ij)
+                h_ij_reflected_high = self.h_ij
+                w_i_reflected_high = self.w_i
+                t_ij_reflected_high[:,j] = 2*h - self.t_ij[:,j]
+            self.t_ij = cp.concatenate([self.t_ij,t_ij_reflected_low,t_ij_reflected_high])
+            self.h_ij = cp.concatenate([self.h_ij,h_ij_reflected_low,h_ij_reflected_high])
+            self.w_i = cp.concatenate([self.w_i,w_i_reflected_low,w_i_reflected_high])
+        self.t_ij = cp.ascontiguousarray(self.t_ij)
+        self.h_ij = cp.ascontiguousarray(self.h_ij)
+        self.w_i = cp.ascontiguousarray(self.w_i)
+            
     _inv_sqrt_2pi = 1/cp.sqrt(2*cp.pi)
 
     def _kdpdf0(x_j,t_ij,h_j,w_i):
@@ -160,23 +191,31 @@ class KernelDensityPDF(Signal):
     def _estimate_pdf_multi(self,x_kj,w_i=None,get=True):
         if w_i == None:
             w_i = self.w_i
-        n = self.t_ij.shape[0]
-        h_j = (4/3/n)**(1/5)*self.sigma_j
-        if cp == np:
-            return np.asarray([KernelDensityPDF._kdpdf0(x_j,self.t_ij,h_j,self.w_i) for x_j in x_kj])
+        if self.bootstrap_binning is None:
+            n = self.t_ij.shape[0]
+            h_j = (4/3/n)**(1/5)*self.sigma_j
+            if cp == np:
+                return np.asarray([KernelDensityPDF._kdpdf0(x_j,self.t_ij,h_j,self.w_i) for x_j in x_kj])
+            else:
+                x_kj = cp.asarray(x_kj)
+                h_j = cp.ascontiguousarray(cp.asarray(h_j))
+                pdf_k = cp.empty(x_kj.shape[0])
+                block_size = 64
+                grid_size = x_kj.shape[0]//block_size+1
+                KernelDensityPDF._kdpdf0_multi((grid_size,),(block_size,),(x_kj,self.t_ij,h_j,w_i,
+                                                                 self.t_ij.shape[0],self.t_ij.shape[1],x_kj.shape[0],
+                                                                 pdf_k))
+                pdf_k = pdf_k/cp.sum(self.w_i)
+                return pdf_k.get() if get else pdf_k
         else:
-            x_kj = cp.asarray(x_kj)
-            h_j = cp.ascontiguousarray(cp.asarray(h_j))
-            pdf_k = cp.empty(x_kj.shape[0])
-            block_size = 64
-            grid_size = x_kj.shape[0]//block_size+1
-            KernelDensityPDF._kdpdf0_multi((grid_size,),(block_size,),(x_kj,self.t_ij,h_j,w_i,
-                                                             self.t_ij.shape[0],self.t_ij.shape[1],x_kj.shape[0],
-                                                             pdf_k))
-            pdf_k = pdf_k/cp.sum(self.w_i)
-            return pdf_k.get() if get else pdf_k
+            #should do this on GPU...
+            x_kj = cp.asnumpy(x_kj)
+            from scipy.interpolate import RegularGridInterpolator
+            interp = RegularGridInterpolator(cp.asnumpy(self.bin_centers),cp.asnumpy(self.counts),bounds_error=False,fill_value=None)
+            return cp.asarray(interp(x_kj))
+            
         
-    def adapt_bandwidth(self,w_i=None):
+    def _adapt_bandwidth(self,w_i=None):
         '''
         Calculates and returns bandwidths for all pdf events.
         '''
@@ -187,7 +226,7 @@ class KernelDensityPDF(Signal):
                * n**(-1/(d+4)) \
                / sigma \
                / self._estimate_pdf_multi(self.t_ij,w_i=w_i,get=False)**(1/d)
-        h_ij = cp.outer(h_i,self.sigma_j)
+        h_ij = cp.outer(h_i,self.rho*self.sigma_j)
         cp.cuda.Stream.null.synchronize()
         return cp.ascontiguousarray(h_ij)
     
