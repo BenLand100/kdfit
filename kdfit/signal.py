@@ -212,7 +212,10 @@ class KernelDensityPDF(Signal):
             x_kj = cp.asnumpy(x_kj)
             from scipy.interpolate import RegularGridInterpolator
             interp = RegularGridInterpolator(cp.asnumpy(self.bin_centers),cp.asnumpy(self.counts),bounds_error=False,fill_value=None)
-            return cp.asarray(interp(x_kj))
+            pdf_k = cp.asarray(interp(x_kj))
+            min_val = np.min(self.counts)
+            pdf_k[pdf_k<min_val] = min_val
+            return pdf_k
             
         
     def _adapt_bandwidth(self,w_i=None):
@@ -222,11 +225,17 @@ class KernelDensityPDF(Signal):
         n = self.t_ij.shape[0]
         d = len(self.observables.dimensions)
         sigma = cp.prod(self.sigma_j)**(1/d)
+        estimates = self._estimate_pdf_multi(self.t_ij,w_i=w_i,get=False)
         h_i = (4/(d+2))**(1/(d+4)) \
                * n**(-1/(d+4)) \
                / sigma \
-               / self._estimate_pdf_multi(self.t_ij,w_i=w_i,get=False)**(1/d)
+               / estimates**(1/d)
         h_ij = cp.outer(h_i,self.rho*self.sigma_j)
+        if cp.any(cp.isnan(h_ij)):
+            print('d:',d,'n:',n,'sigma:',sigma)
+            print('sigma_j:',self.sigma_j)
+            print('small_estimates',estimates[estimates<1e-8])
+            raise Exception('NaN bandwidths in '+self.name)
         cp.cuda.Stream.null.synchronize()
         return cp.ascontiguousarray(h_ij)
     
@@ -464,6 +473,12 @@ class KernelDensityPDF(Signal):
                                   t_ij.shape[0], t_ij.shape[1], x_kj.shape[0],
                                   pdf_k))
                 pdf_k = pdf_k/cp.sum(self.w_i)/norm
+                if cp.any(cp.isnan(pdf_k)):
+                    print('w_i sum:',cp.sum(self.w_i),'norm:',norm)
+                    print('t_ij nan:',t_ij[cp.isnan(t_ij)])
+                    print('h_ij nan:',h_ij[cp.isnan(h_ij)])
+                    print('h_ij zero:',h_ij[h_ij == 0])
+                    raise Exception('NaN value probability in '+self.name)
                 return pdf_k.get() if get else pdf_k
     
     def _transform_syst(self,inputs):

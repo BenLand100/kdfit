@@ -159,18 +159,20 @@ class System:
     # between floated and fixed, building a parameter list for both.
     
     def calculate(self,floated,verbose=False):
+        if type(verbose) is bool:
+            verbose = 1 if verbose else 0
         recompute = []
         for indexes,values in [(self.floated_indexes,floated),(self.fixed_indexes,[p.value for p in self.parts[self.fixed_indexes]])]:
             for index,value in zip(indexes,values):
                 if self.state[index] is not value:
-                    if verbose:
+                    if verbose > 1:
                         print('Changed input:',self.parts[index],self.state[index],'=>',value)
                     self.not_evaluated[index] = False
                     self.state[index] = value
                     recompute.extend(self.children_indexes[index])
         recompute.extend([constant_index for constant_index in self.constant_indexes if self.state[constant_index] is None])
         recompute = np.unique(np.asarray(recompute,dtype=np.uint32))
-        if verbose:
+        if verbose > 2:
             print('Top-level recompute:',self.parts[recompute])
         
         not_queued = np.ones_like(self.parts,dtype=bool)
@@ -180,7 +182,7 @@ class System:
             index = invalidate_queue.popleft()
             not_queued[index] = True
             if not self.not_evaluated[index]:
-                if verbose:
+                if verbose > 2:
                     print('Invalidate:',self.parts[index])
                 self.not_evaluated[index] = True
                 children = self.children_indexes[index]
@@ -196,7 +198,7 @@ class System:
             not_queued[index] = True
             parents = self.parents_indexes[index]
             inputs_not_evaluated = self.not_evaluated[parents]
-            if verbose:
+            if verbose > 2:
                 print('Testing',self.parts[index],'parents:',
                       ', '.join(['%s:%s'%(self.parts[i],self.not_evaluated[i]) for i in parents]))
             if np.any(inputs_not_evaluated): 
@@ -207,7 +209,7 @@ class System:
             self.not_evaluated[index] = False
             children = self.children_indexes[index]
             children = children[not_queued[children]]
-            if verbose:
+            if verbose > 1:
                 print('Queuing children:',self.parts[children])
             not_queued[children] = False
             recompute_queue.extend(children)
