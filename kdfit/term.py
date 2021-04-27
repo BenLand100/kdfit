@@ -23,7 +23,7 @@ except:
 import itertools as it
 from .calculate import Calculation
 from .signal import Signal
-from .utility import PDFBinner
+from .utility import PDFBinner, PDFEvaluator
         
 class Sum(Calculation):
     '''
@@ -49,20 +49,19 @@ class UnbinnedNegativeLogLikelihoodFunction(Calculation):
         self.signals = signals
         self.observables = observables
         n_evs = [s.nev_param for s in signals]
-        super().__init__(name,n_evs+signals+[observables])
+        pdf_sk = [PDFEvaluator(s.name+'_eval',s,observables) for s in signals]
+        super().__init__(name,n_evs+pdf_sk)
 
     def calculate(self, inputs, verbose=False):
-        n_evs = inputs[:len(self.signals)]
-        signal_systs = inputs[len(self.signals):-1]
-        x_kj = cp.ascontiguousarray(cp.asarray(inputs[-1]))
+        n_evs = cp.asarray(list(inputs[:len(self.signals)]))
+        pdf_sk = cp.asarray(list(inputs[len(self.signals):]))
         if verbose:
             print('Evaluate:',', '.join(['%0.3f'%s for s in n_evs]))
+        pdf_k = cp.sum((pdf_sk.T*n_evs),axis=1)
         if cp == np: # No GPU acceleration
-            pdf_sk = np.asarray([n*s.eval_pdf_multi(x_kj,systs=systs) for n,s,systs in zip(n_evs,self.signals,signal_systs)])
-            res = np.sum(n_evs) - np.sum(np.log(np.sum(pdf_sk,axis=0)))
+            res = np.sum(n_evs) - np.sum(np.log(pdf_k))
         else:
-            pdf_sk = cp.asarray([n*s.eval_pdf_multi(x_kj,systs=systs,get=False) for n,s,systs in zip(n_evs,self.signals,signal_systs)])
-            res = np.sum(n_evs) - cp.sum(cp.log(cp.sum(pdf_sk,axis=0))).get()
+            res = cp.sum(n_evs).get() - cp.sum(cp.log(pdf_k)).get()
         if verbose:
             print('NLL:',res)
         return res

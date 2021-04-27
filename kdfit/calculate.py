@@ -109,6 +109,11 @@ class System:
                 parents_indexes.append([])
             else:
                 index = parts.index(parent)
+                #This prevents the same Calculation from appearing multiple
+                #times in the input list, but is necessary to avoid double
+                #counting if the tree is not trivial
+                if child_index in children_indexes[index]:
+                    continue #already mapped this branch
             if verbose:
                 print(parent,'=>',child)
             parents_indexes[child_index].append(index)

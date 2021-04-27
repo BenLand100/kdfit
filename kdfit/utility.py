@@ -24,6 +24,21 @@ except:
 from .calculate import Calculation
 from .signal import BinnedPDF
     
+class PDFEvaluator(Calculation):
+
+    def __init__(self,name,pdf,data):
+        super().__init__(name,[pdf,data])
+        self.pdf = pdf
+        
+    def calculate(self,inputs,verbose=False):
+        systs,x_ij = inputs
+        
+        x_kj = cp.ascontiguousarray(cp.asarray(x_ij))
+        if cp == np:
+            return self.pdf.eval_pdf_multi(x_kj,systs=systs)
+        else:
+            return self.pdf.eval_pdf_multi(x_kj,systs=systs,get=False)
+    
 class PDFBinner(Calculation):
 
     def __init__(self,name,pdf,binning):

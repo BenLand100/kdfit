@@ -88,7 +88,7 @@ class Analysis:
             print('Floated Parameters:',self._floated)
             print('Fixed Parameters:',self._fixed)
         
-    def __call__(self,floated_params=None,verbose=False):
+    def __call__(self,floated_params=None,verbose=False,show_steps=False):
         '''
         Performs the current log likelihood calculation and returns the result.
         
@@ -98,18 +98,22 @@ class Analysis:
         '''
         if floated_params is None:
             floated_params = [p.value for p in self._floated]
+        if show_steps:
+            print('Evaluating at: ',', '.join(['%0.2f'%x for x in floated_params]))
         outputs = self._system.calculate(floated_params,verbose=verbose)
+        if show_steps:
+            print('Result: ',outputs[0])
         return outputs[0]
         
-    def minimize(self,**kwargs):
+    def minimize(self,verbose=False,show_steps=False,**kwargs):
         '''
         Will optimize the floated parameters in the current log likelihood 
         calculation to minimize the log likelihood.
         
         Keyword arguments are passed to scipy.optimize.minimize
         '''
-        initial = [g if (g:=p.value) else 1.0 for p in self._floated]
-        minimum = opt.minimize(self,x0=initial,**kwargs)
+        initial = [g if (g:=p.value) is not None else 1.0 for p in self._floated]
+        minimum = opt.minimize(partial(self,show_steps=show_steps,verbose=verbose),x0=initial,**kwargs)
         minimum.params = {p:v for p,v in zip(self._floated,minimum.x)}
         return minimum
         
