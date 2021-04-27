@@ -17,10 +17,13 @@
 
 from .calculate import Calculation
 
-import h5py
 import numpy as np
 try:    
     import uproot4
+except:
+    pass
+try:
+    import h5py
 except:
     pass
 
@@ -102,10 +105,11 @@ class NPYData(DataLoader):
                     
 class SNOPlusNTuple(DataLoader):
 
-    def __init__(self,name,filenames,branches):
+    def __init__(self,name,filenames,branches,max_events=None):
         super().__init__(name)
         self.filenames = filenames
         self.branches = branches
+        self.max_events = max_events
         
     def __call__(self):
         print('Loading:',', '.join(self.filenames))
@@ -117,7 +121,7 @@ class SNOPlusNTuple(DataLoader):
                     x_ji = np.asarray([froot['output'][branch].array() for branch in self.branches])
                     x_nij.append(x_ji.T)
                     events += x_ji.shape[1]
-                if events > 100000:
+                if self.max_events is not None and events > self.max_events:
                     break
             except:
                 print('Couldn''t read',fname)

@@ -21,6 +21,7 @@ try:
     import cupy as cp
     from cupyx.scipy.special import erf
 except:
+    print('kdfit.signal could not import CuPy - falling back to NumPy')
     cp = np # Use numpy to emulate cupy on CPU
     from scipy.special import erf
 from .calculate import Calculation

@@ -20,6 +20,7 @@ import itertools as it
 try:
     import cupy as cp
 except:
+    print('kdfit.utility could not import CuPy - falling back to NumPy')
     cp = np # Use numpy to emulate cupy on CPU
 from .calculate import Calculation
 from .signal import BinnedPDF

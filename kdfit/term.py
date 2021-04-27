@@ -19,6 +19,7 @@ import numpy as np
 try:
     import cupy as cp
 except:
+    print('kdfit.term could not import CuPy - falling back to NumPy')
     cp = np # Use numpy to emulate cupy on CPU
 import itertools as it
 from .calculate import Calculation
@@ -99,7 +100,7 @@ class BinnedNegativeLogLikelihoodFunction(Calculation):
         if x_kj is not self.last_x_kj:
             if np == cp:
                 self.counts,_ = np.histogramdd(x_kj,bins=self.bin_edges)
-            else:
+            else: # FIXME cupy-9.0.0 implements histogramdd (needs testing)
                 counts,_ = np.histogramdd(x_kj,bins=self.bin_edges.get())
                 self.counts = cp.asarray(counts)
             self.last_x_kj = x_kj
