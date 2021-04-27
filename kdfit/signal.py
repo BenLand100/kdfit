@@ -95,10 +95,10 @@ class KernelDensityPDF(Signal):
                     self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],bins) for j,bins in enumerate(bootstrap_binning)]
                 else:
                     self.bin_edges = bootstrap_binning
-            self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges))
+            self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges)) #FIXME this won't work with different number of bins in each dimension
             self.indexes = [np.arange(len(edges)) for edges in self.bin_edges]
-            self.a_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:, :-1])]))
-            self.b_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:,1:  ])]))
+            self.a_kj = cp.ascontiguousarray(cp.asarray(list(it.product(*self.bin_edges[:, :-1]))))
+            self.b_kj = cp.ascontiguousarray(cp.asarray(list(it.product(*self.bin_edges[:,1:  ]))))
             self.bin_centers = cp.ascontiguousarray(cp.asarray([(edges[:-1]+edges[1:])/2 for edges in self.bin_edges]))
             self.bin_vol = cp.ascontiguousarray(cp.prod(self.b_kj-self.a_kj,axis=1))
         self.reflect_axes = reflect_axes if reflect_axes is not None else [False for _ in range(len(observables.dimensions))]
@@ -547,10 +547,10 @@ class BinnedPDF(Signal):
                 self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],bins) for j,bins in enumerate(binning)]
             else:
                 self.bin_edges = binning
-        self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges))
+        self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges)) #FIXME this won't work with different number of bins in each dimension
         self.indexes = [np.arange(len(edges)) for edges in self.bin_edges]
-        self.a_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:, :-1])]))
-        self.b_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:,1:  ])]))
+        self.a_kj = cp.ascontiguousarray(cp.asarray(list(it.product(*self.bin_edges[:, :-1]))))
+        self.b_kj = cp.ascontiguousarray(cp.asarray(list(it.product(*self.bin_edges[:,1:  ]))))
         self.bin_centers = cp.ascontiguousarray(cp.asarray([(edges[:-1]+edges[1:])/2 for edges in self.bin_edges]))
         self.bin_vol = cp.ascontiguousarray(cp.prod(self.b_kj-self.a_kj,axis=1))
         super().__init__(name,observables,[self.mc_param]+self.systematics,value=value)
