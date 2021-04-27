@@ -23,11 +23,11 @@ Currently `kdfit` is pre-alpha. API is subject to change at any time.
 This project depends on features present in Python 3.9+. The included setup.py 
 will install all necessary dependencies:
 
-[CuPy](https://cupy.dev/)
-[NumPy](https://numpy.org/)
-[SciPy](https://www.scipy.org/)
-[Uproot4](https://uproot.readthedocs.io/en/latest/) - optional
-[h5py](https://www.h5py.org/) - optional
+* [CuPy](https://cupy.dev/)
+* [NumPy](https://numpy.org/)
+* [SciPy](https://www.scipy.org/)
+* [Uproot4](https://uproot.readthedocs.io/en/latest/) - optional
+* [h5py](https://www.h5py.org/) - optional
 
 ## Installing
 
