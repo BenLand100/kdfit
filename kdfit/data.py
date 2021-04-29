@@ -70,9 +70,12 @@ class HDF5Data(DataLoader):
                             data[j].extend(ds[:to_read])
                     else:
                         data[j].extend(hf[ds][:])
-            if len(data[0]) >= self.max_events:
+            if self.max_events is not None and len(data[0]) >= self.max_events:
                 break
-        return np.asarray(data)[:,:self.max_events].T
+        if self.max_events is not None:
+            return np.asarray(data)[:,:self.max_events].T
+        else:
+            return np.asarray(data).T
         
 class NPYData(DataLoader):
     '''
