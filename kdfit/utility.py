@@ -23,7 +23,15 @@ except:
     print('kdfit.utility could not import CuPy - falling back to NumPy')
     cp = np # Use numpy to emulate cupy on CPU
 from .calculate import Calculation
-from .signal import BinnedPDF
+
+def binning_to_edges(binning):
+    if type(binning) == int:
+        return [cp.linspace(pdf.observables.lows[j],pdf.observables.highs[j],binning) for j in range(len(pdf.observables.dimensions))]
+    else:
+        if type(binning[0]) == int:
+            return [cp.linspace(observables.lows[j],observables.highs[j],bins) for j,bins in enumerate(binning)]
+        else:
+            return binning
     
 class PDFEvaluator(Calculation):
 
@@ -43,16 +51,14 @@ class PDFEvaluator(Calculation):
 class PDFBinner(Calculation):
 
     def __init__(self,name,pdf,binning):
+        from .signal import BinnedPDF
         super().__init__(name,[pdf])
         self.pdf = pdf        
         if isinstance(pdf,BinnedPDF) and pdf.binning == binning:
             self.binned_correctly = True
         else:
             self.binned_correctly = False
-            if type(binning) == int:
-                self.bin_edges = [cp.linspace(pdf.observables.lows[j],pdf.observables.highs[j],binning) for j in range(len(pdf.observables.dimensions))]
-            else:
-                self.bin_edges = [cp.linspace(pdf.observables.lows[j],pdf.observables.highs[j],bins) for j,bins in enumerate(binning)]
+            self.bin_edges = binning_to_edges(binning)
             self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges)) #FIXME this won't work with different number of bins in each dimension
             self.a_kj = cp.ascontiguousarray(cp.asarray(list(it.product(*self.bin_edges[:, :-1]))))
             self.b_kj = cp.ascontiguousarray(cp.asarray(list(it.product(*self.bin_edges[:,1:  ]))))

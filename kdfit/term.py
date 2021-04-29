@@ -24,7 +24,7 @@ except:
 import itertools as it
 from .calculate import Calculation
 from .signal import Signal
-from .utility import PDFBinner, PDFEvaluator
+from .utility import PDFBinner, PDFEvaluator, binning_to_edges
         
 class Sum(Calculation):
     '''
@@ -65,6 +65,8 @@ class UnbinnedNegativeLogLikelihoodFunction(Calculation):
             res = cp.sum(n_evs).get() - cp.sum(cp.log(pdf_k)).get()
         if verbose:
             print('NLL:',res)
+        if np.isnan(res):
+            raise Exception('NaN unbinned likelihood!')
         return res
 
 class BinnedNegativeLogLikelihoodFunction(Calculation):
@@ -78,10 +80,7 @@ class BinnedNegativeLogLikelihoodFunction(Calculation):
     omits any terms that are constant as a function of input scales.
     '''
     def __init__(self, name, signals, observables, binning=21):
-        if type(binning) == int:
-            self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],binning) for j in range(len(observables.dimensions))]
-        else:
-            self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],bins) for j,bins in enumerate(binning)]
+        self.bin_edges = binning_to_edges(binning)
         self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges))
         self.a_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:, :-1])]))
         self.b_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:,1:  ])]))
@@ -112,4 +111,6 @@ class BinnedNegativeLogLikelihoodFunction(Calculation):
         res = cp.sum(n_evs) - cp.sum(self.counts[mask]*cp.log(expected[mask]))
         if verbose:
             print('NLL:',res)
+        if np.isnan(res):
+            raise Exception('NaN binned likelihood!')
         return res if np == cp else res.get()

@@ -25,6 +25,7 @@ except:
     cp = np # Use numpy to emulate cupy on CPU
     from scipy.special import erf
 from .calculate import Calculation
+from .utility import binning_to_edges
     
 class Signal(Calculation):
     '''
@@ -88,13 +89,7 @@ class KernelDensityPDF(Signal):
         self.rho = rho
         self.bootstrap_binning = bootstrap_binning
         if bootstrap_binning is not None:
-            if type(bootstrap_binning) == int:
-                self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],bootstrap_binning) for j in range(len(observables.dimensions))]
-            else:
-                if type(bootstrap_binning[0]) == int:
-                    self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],bins) for j,bins in enumerate(bootstrap_binning)]
-                else:
-                    self.bin_edges = bootstrap_binning
+            self.bin_edges = binning_to_edges(bootstrap_binning)
             self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges)) #FIXME this won't work with different number of bins in each dimension
             self.indexes = [np.arange(len(edges)) for edges in self.bin_edges]
             self.a_kj = cp.ascontiguousarray(cp.asarray(list(it.product(*self.bin_edges[:, :-1]))))
@@ -540,13 +535,7 @@ class BinnedPDF(Signal):
         self.cur_mc = None
         self.interpolation = interpolation
         self.binning = binning        
-        if type(binning) == int:
-            self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],binning) for j in range(len(observables.dimensions))]
-        else:
-            if type(binning[0]) == int:
-                self.bin_edges = [cp.linspace(observables.lows[j],observables.highs[j],bins) for j,bins in enumerate(binning)]
-            else:
-                self.bin_edges = binning
+        self.bin_edges = binning_to_edges(binning)
         self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges)) #FIXME this won't work with different number of bins in each dimension
         self.indexes = [np.arange(len(edges)) for edges in self.bin_edges]
         self.a_kj = cp.ascontiguousarray(cp.asarray(list(it.product(*self.bin_edges[:, :-1]))))
