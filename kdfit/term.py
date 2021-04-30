@@ -46,7 +46,8 @@ class UnbinnedNegativeLogLikelihoodFunction(Calculation):
     logarithm of the product of the data likelihood and Poisson likelihood that
     omits any terms that are constant as a function of input scales.
     '''
-    def __init__(self, name, signals, observables):
+    def __init__(self, name, signals, observables, nan_behavior='unlikely'):
+        self.nan_behavior = nan_behavior
         self.signals = signals
         self.observables = observables
         n_evs = [s.nev_param for s in signals]
@@ -66,7 +67,10 @@ class UnbinnedNegativeLogLikelihoodFunction(Calculation):
         if verbose:
             print('NLL:',res)
         if np.isnan(res):
-            raise Exception('NaN unbinned likelihood!')
+            if self.nan_behavior == 'unlikely':
+                return 1e200
+            else:
+                raise Exception('NaN likelihood!')
         return res
 
 class BinnedNegativeLogLikelihoodFunction(Calculation):
@@ -79,7 +83,8 @@ class BinnedNegativeLogLikelihoodFunction(Calculation):
     logarithm of the product of the data likelihood and Poisson likelihood that
     omits any terms that are constant as a function of input scales.
     '''
-    def __init__(self, name, signals, observables, binning=21):
+    def __init__(self, name, signals, observables, binning=21, nan_behavior='unlikely'):
+        self.nan_behavior = nan_behavior
         self.bin_edges = binning_to_edges(binning)
         self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges))
         self.a_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:, :-1])]))
@@ -112,5 +117,8 @@ class BinnedNegativeLogLikelihoodFunction(Calculation):
         if verbose:
             print('NLL:',res)
         if np.isnan(res):
-            raise Exception('NaN binned likelihood!')
+            if self.nan_behavior == 'unlikely':
+                return 1e200
+            else:
+                raise Exception('NaN likelihood!')
         return res if np == cp else res.get()
