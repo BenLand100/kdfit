@@ -150,7 +150,7 @@ class Analysis:
                 p.fixed = True
                 self.update_likelihood()
                 if method == 'profile':
-                    dnll = partial(self._delta_nll,minimum,p,margs=margs,ci_delta=ci_delta)
+                    dnll = partial(self._delta_nll_profile,minimum,p,margs=margs,ci_delta=ci_delta)
                 elif method == 'scan':
                     dnll = partial(self._delta_nll_scan,minimum,p,ci_delta=ci_delta)
                 else:
