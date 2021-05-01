@@ -76,6 +76,21 @@ class HDF5Data(DataLoader):
             return np.asarray(data)[:,:self.max_events].T
         else:
             return np.asarray(data).T
+            
+
+class BinnedHDF5Data(DataLoader):
+    '''
+    Assumes data is pre-binned store in a dataset named 'binned'
+    '''
+
+    def __init__(self,name,filename):
+        super().__init__(name)
+        self.filename = filename
+    
+    def __call__(self):
+        print('Loading:',', '.join(self.filename))
+        with h5py.File(self.filename,'r') as hf:
+            return hf['binned'][:]
         
 class NPYData(DataLoader):
     '''

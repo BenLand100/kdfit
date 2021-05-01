@@ -102,7 +102,10 @@ class BinnedNegativeLogLikelihoodFunction(Calculation):
         binned_signals = inputs[len(self.signals):-1]
         x_kj = inputs[-1]
         if x_kj is not self.last_x_kj:
-            if np == cp:
+            if x_kj.shape == tuple([len(edges)-1 for edges in self.bin_edges]):
+                print('NOTE: pre-binned data detected; assuming binning is correct')
+                self.counts = cp.asarray(x_kj)
+            elif np == cp:
                 self.counts,_ = np.histogramdd(x_kj,bins=self.bin_edges)
             else: # FIXME cupy-9.0.0 implements histogramdd (needs testing)
                 counts,_ = np.histogramdd(x_kj,bins=self.bin_edges.get())
