@@ -25,7 +25,7 @@ except:
     cp = np # Use numpy to emulate cupy on CPU
     from scipy.special import erf
 from .calculate import Calculation
-from .utility import binning_to_edges
+from .utility import binning_to_edges, edges_to_points
     
 class Signal(Calculation):
     '''
@@ -90,10 +90,8 @@ class KernelDensityPDF(Signal):
         self.bootstrap_binning = bootstrap_binning
         if bootstrap_binning is not None:
             self.bin_edges = binning_to_edges(bootstrap_binning)
-            self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges)) #FIXME this won't work with different number of bins in each dimension
             self.indexes = [np.arange(len(edges)) for edges in self.bin_edges]
-            self.a_kj = cp.ascontiguousarray(cp.asarray(list(it.product(*self.bin_edges[:, :-1]))))
-            self.b_kj = cp.ascontiguousarray(cp.asarray(list(it.product(*self.bin_edges[:,1:  ]))))
+            self.a_kj, self.b_kj = edges_to_points(self.bin_edges)
             self.bin_centers = cp.ascontiguousarray(cp.asarray([(edges[:-1]+edges[1:])/2 for edges in self.bin_edges]))
             self.bin_vol = cp.ascontiguousarray(cp.prod(self.b_kj-self.a_kj,axis=1))
         self.reflect_axes = reflect_axes if reflect_axes is not None else [False for _ in range(len(observables.dimensions))]
@@ -536,19 +534,17 @@ class BinnedPDF(Signal):
         self.interpolation = interpolation
         self.binning = binning        
         self.bin_edges = binning_to_edges(binning)
-        self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges)) #FIXME this won't work with different number of bins in each dimension
         self.indexes = [np.arange(len(edges)) for edges in self.bin_edges]
-        self.a_kj = cp.ascontiguousarray(cp.asarray(list(it.product(*self.bin_edges[:, :-1]))))
-        self.b_kj = cp.ascontiguousarray(cp.asarray(list(it.product(*self.bin_edges[:,1:  ]))))
-        self.bin_centers = cp.ascontiguousarray(cp.asarray([(edges[:-1]+edges[1:])/2 for edges in self.bin_edges]))
-        self.bin_vol = cp.ascontiguousarray(cp.prod(self.b_kj-self.a_kj,axis=1))
+        self.a_kj, self.b_kj = edges_to_points(self.bin_edges)
+        self.bin_centers = [(edges[:-1]+edges[1:])/2 for edges in self.bin_edges]
+        self.bin_vol = cp.prod(self.b_kj-self.a_kj,axis=1)
         super().__init__(name,observables,[self.mc_param]+self.systematics,value=value)
         
     def bin_mc(self,t_ij,w_i):
         '''
         '''
-        counts,_ = np.histogramdd(cp.asnumpy(t_ij),bins=cp.asnumpy(self.bin_edges),weights=cp.asnumpy(w_i))
-        return (cp.asarray(counts).flatten()/self.bin_vol/cp.sum(cp.asarray(counts))).reshape(counts.shape)
+        counts,_ = cp.histogramdd(cp.asarray(t_ij),bins=self.bin_edges,weights=cp.asarray(w_i))
+        return (counts.flatten()/self.bin_vol/cp.sum(counts)).reshape(counts.shape)
         
     def load_mc(self,t_ij):
         self.t_ij = cp.ascontiguousarray(cp.asarray(t_ij))

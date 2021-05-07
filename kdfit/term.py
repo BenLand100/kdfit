@@ -16,6 +16,7 @@
 #  along with kdfit.  If not, see <https://www.gnu.org/licenses/>.
 
 import numpy as np
+from scipy.special import gammaln
 try:
     import cupy as cp
 except:
@@ -24,7 +25,7 @@ except:
 import itertools as it
 from .calculate import Calculation
 from .signal import Signal
-from .utility import PDFBinner, PDFEvaluator, binning_to_edges
+from .utility import PDFBinner, PDFEvaluator, binning_to_edges, edges_to_points
         
 class Sum(Calculation):
     '''
@@ -86,9 +87,7 @@ class BinnedNegativeLogLikelihoodFunction(Calculation):
     def __init__(self, name, signals, observables, binning=21, nan_behavior='unlikely'):
         self.nan_behavior = nan_behavior
         self.bin_edges = binning_to_edges(binning)
-        self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges))
-        self.a_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:, :-1])]))
-        self.b_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*self.bin_edges[:,1:  ])]))
+        self.a_kj, self.b_kj = edges_to_points(self.bin_edges)
         self.bin_vol = cp.ascontiguousarray(cp.prod(self.b_kj-self.a_kj,axis=1))
         self.signals = signals
         self.observables = observables
@@ -108,7 +107,7 @@ class BinnedNegativeLogLikelihoodFunction(Calculation):
             elif np == cp:
                 self.counts,_ = np.histogramdd(x_kj,bins=self.bin_edges)
             else: # FIXME cupy-9.0.0 implements histogramdd (needs testing)
-                counts,_ = np.histogramdd(x_kj,bins=self.bin_edges.get())
+                counts,_ = np.histogramdd(x_kj,bins=self.bin_edges)
                 self.counts = cp.asarray(counts)
             self.last_x_kj = x_kj
         if verbose:

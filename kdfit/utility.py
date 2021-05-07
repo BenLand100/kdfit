@@ -31,7 +31,12 @@ def binning_to_edges(binning):
         if type(binning[0]) == int:
             return [cp.linspace(observables.lows[j],observables.highs[j],bins) for j,bins in enumerate(binning)]
         else:
-            return binning
+            return [cp.asarray(edges) for edges in binning]
+            
+def edges_to_points(bin_edges):
+    a_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*[edges[:-1] for edges in bin_edges])]))
+    b_kj = cp.ascontiguousarray(cp.asarray([cp.asarray(x) for x in it.product(*[edges[1: ] for edges in bin_edges])]))
+    return a_kj,b_kj
     
 class PDFEvaluator(Calculation):
 
@@ -59,9 +64,7 @@ class PDFBinner(Calculation):
         else:
             self.binned_correctly = False
             self.bin_edges = binning_to_edges(binning)
-            self.bin_edges = cp.ascontiguousarray(cp.asarray(self.bin_edges)) #FIXME this won't work with different number of bins in each dimension
-            self.a_kj = cp.ascontiguousarray(cp.asarray(list(it.product(*self.bin_edges[:, :-1]))))
-            self.b_kj = cp.ascontiguousarray(cp.asarray(list(it.product(*self.bin_edges[:,1:  ]))))
+            self.a_kj, self.b_kj = edges_to_points(self.bin_edges)
             self.bin_vol = cp.ascontiguousarray(cp.prod(self.b_kj-self.a_kj,axis=1))
         self.last_systs = None
         self.bin_ints = None
@@ -72,7 +75,7 @@ class PDFBinner(Calculation):
             if self.binned_correctly:
                 self.bin_ints = systs
             else:
-                norm = self.pdf.int_pdf(self.bin_edges[:,0],self.bin_edges[:,-1],systs=systs) 
+                norm = self.pdf.int_pdf([edges[0] for edges in self.bin_edges],[edges[-1] for edges in self.bin_edges],systs=systs) 
                 self.bin_ints = self.pdf.int_pdf_multi(self.a_kj,self.b_kj,systs=systs)/norm
             self.last_systs = systs
         return self.bin_ints
