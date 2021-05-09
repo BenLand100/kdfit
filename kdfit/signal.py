@@ -110,7 +110,7 @@ class KernelDensityPDF(Signal):
         self.t_ij = cp.asarray(t_ij)
         self.w_i = cp.ones(t_ij.shape[0])
         if self.bootstrap_binning is not None:
-            counts,_ = np.histogramdd(cp.asnumpy(self.t_ij),bins=cp.asnumpy(self.bin_edges),weights=cp.asnumpy(self.w_i))
+            counts,_ = cp.histogramdd(cp.asarray(self.t_ij),bins=self.bin_edges,weights=cp.asarray(self.w_i))
             self.counts = (cp.asarray(counts).flatten()/self.bin_vol/cp.sum(cp.asarray(counts))).reshape(counts.shape)
         self.sigma_j = cp.std(self.t_ij,axis=0)
         self.h_ij = self._adapt_bandwidth()
