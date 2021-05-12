@@ -89,7 +89,7 @@ class KernelDensityPDF(Signal):
         self.rho = rho
         self.bootstrap_binning = bootstrap_binning
         if bootstrap_binning is not None:
-            self.bin_edges = binning_to_edges(bootstrap_binning)
+            self.bin_edges = binning_to_edges(bootstrap_binning,lows=observables.lows,highs=observables.highs)
             self.indexes = [np.arange(len(edges)) for edges in self.bin_edges]
             self.a_kj, self.b_kj = edges_to_points(self.bin_edges)
             self.bin_centers = cp.ascontiguousarray(cp.asarray([(edges[:-1]+edges[1:])/2 for edges in self.bin_edges]))
@@ -533,7 +533,7 @@ class BinnedPDF(Signal):
         self.cur_mc = None
         self.interpolation = interpolation
         self.binning = binning        
-        self.bin_edges = binning_to_edges(binning)
+        self.bin_edges = binning_to_edges(binning,lows=observables.lows,highs=observables.highs)
         self.indexes = [np.arange(len(edges)) for edges in self.bin_edges]
         self.a_kj, self.b_kj = edges_to_points(self.bin_edges)
         self.bin_centers = [(edges[:-1]+edges[1:])/2 for edges in self.bin_edges]

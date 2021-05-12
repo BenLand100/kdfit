@@ -24,12 +24,12 @@ except:
     cp = np # Use numpy to emulate cupy on CPU
 from .calculate import Calculation
 
-def binning_to_edges(binning):
+def binning_to_edges(binning,lows=None,highs=None):
     if type(binning) == int:
-        return [cp.linspace(pdf.observables.lows[j],pdf.observables.highs[j],binning) for j in range(len(pdf.observables.dimensions))]
+        return [cp.linspace(lows[j],highs[j],binning) for j in range(len(lows))]
     else:
         if type(binning[0]) == int:
-            return [cp.linspace(observables.lows[j],observables.highs[j],bins) for j,bins in enumerate(binning)]
+            return [cp.linspace(lows[j],highs[j],bins) for j,bins in enumerate(binning)]
         else:
             return [cp.asarray(edges) for edges in binning]
             

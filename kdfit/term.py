@@ -86,7 +86,7 @@ class BinnedNegativeLogLikelihoodFunction(Calculation):
     '''
     def __init__(self, name, signals, observables, binning=21, nan_behavior='unlikely'):
         self.nan_behavior = nan_behavior
-        self.bin_edges = binning_to_edges(binning)
+        self.bin_edges = binning_to_edges(binning,lows=observables.lows,highs=observables.highs)
         self.a_kj, self.b_kj = edges_to_points(self.bin_edges)
         self.bin_vol = cp.ascontiguousarray(cp.prod(self.b_kj-self.a_kj,axis=1))
         self.signals = signals
@@ -104,11 +104,8 @@ class BinnedNegativeLogLikelihoodFunction(Calculation):
             if x_kj.shape == tuple([len(edges)-1 for edges in self.bin_edges]):
                 print('NOTE: pre-binned data detected; assuming binning is correct')
                 self.counts = cp.asarray(x_kj)
-            elif np == cp:
-                self.counts,_ = np.histogramdd(x_kj,bins=self.bin_edges)
-            else: # FIXME cupy-9.0.0 implements histogramdd (needs testing)
-                counts,_ = np.histogramdd(x_kj,bins=self.bin_edges)
-                self.counts = cp.asarray(counts)
+            else:
+                self.counts,_ = cp.histogramdd(cp.asarray(x_kj),bins=self.bin_edges)
             self.last_x_kj = x_kj
         if verbose:
             print('Evaluate:',', '.join(['%0.3f'%s for s in n_evs]))
