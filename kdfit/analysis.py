@@ -175,7 +175,7 @@ class Analysis:
             # Put parameter settings back to how they were before
             for p,(v,c) in zip(params,initial_state):
                 p.value = v
-                p.constant = c
+                p.fixed = c
             self.update_likelihood()
         minimum.upper = upper
         minimum.lower = lower
