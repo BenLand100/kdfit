@@ -92,7 +92,7 @@ class KernelDensityPDF(Signal):
             self.bin_edges = binning_to_edges(bootstrap_binning,lows=observables.lows,highs=observables.highs)
             self.indexes = [np.arange(len(edges)) for edges in self.bin_edges]
             self.a_kj, self.b_kj = edges_to_points(self.bin_edges)
-            self.bin_centers = cp.ascontiguousarray(cp.asarray([(edges[:-1]+edges[1:])/2 for edges in self.bin_edges]))
+            self.bin_centers = [(edges[:-1]+edges[1:])/2 for edges in self.bin_edges]
             self.bin_vol = cp.ascontiguousarray(cp.prod(self.b_kj-self.a_kj,axis=1))
         self.reflect_axes = reflect_axes if reflect_axes is not None else [False for _ in range(len(observables.dimensions))]
         self.a = cp.asarray([l for l in observables.lows])
@@ -570,7 +570,7 @@ class BinnedPDF(Signal):
         elif self.interpolation == 'linear': #FIXME could do this on GPU
             x_kj = cp.asnumpy(x_kj)
             from scipy.interpolate import RegularGridInterpolator
-            interp = RegularGridInterpolator(cp.asnumpy(self.bin_centers),cp.asnumpy(counts),bounds_error=False,fill_value=0)
+            interp = RegularGridInterpolator(self.bin_centers,cp.asnumpy(counts),bounds_error=False,fill_value=0)
             return interp(x_kj)
     
     def _transform_syst(self,inputs,t_ij=None):
